@@ -8,10 +8,10 @@ import { loadInboxCounts, loadOwnAvatar, markPresence } from "@/lib/member-data"
 import { useLang } from "@/components/LanguageProvider";
 
 /**
- * Cupid Media-style desktop chrome:
- * - Globe → language menu
- * - Profile photo → member menu (edit profile / settings / sign out)
- * - Gear → account settings menu (profile settings entry, privacy, sign out)
+ * Cupid Media desktop chrome (matched from KenyanCupid .membernav):
+ * - Globe + current language + chevron → hover/click opens white language list
+ * - Profile photo → member menu (edit profile / photos / settings / sign out)
+ * - Gear → Profile settings menu
  */
 export function DesktopMemberShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -24,12 +24,15 @@ export function DesktopMemberShell({ children }: { children: React.ReactNode }) 
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const closeTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const topLinks = [
     { href: "/app", label: t("home") },
     { href: "/app/messages", label: t("messages"), badge: "messages" as const },
     { href: "/app/matches", label: t("activity"), badge: "likes" as const },
   ];
+
+  const langLabel = lang === "sw" ? t("swahili") : t("english");
 
   useEffect(() => {
     const supabase = createClient();
@@ -94,6 +97,25 @@ export function DesktopMemberShell({ children }: { children: React.ReactNode }) 
     setSettingsOpen(false);
   }
 
+  function openOnly(which: "lang" | "profile" | "settings") {
+    setLangOpen(which === "lang");
+    setProfileOpen(which === "profile");
+    setSettingsOpen(which === "settings");
+  }
+
+  function scheduleClose(which: "lang" | "profile" | "settings") {
+    clearTimeout(closeTimers.current[which]);
+    closeTimers.current[which] = setTimeout(() => {
+      if (which === "lang") setLangOpen(false);
+      if (which === "profile") setProfileOpen(false);
+      if (which === "settings") setSettingsOpen(false);
+    }, 180);
+  }
+
+  function cancelClose(which: "lang" | "profile" | "settings") {
+    clearTimeout(closeTimers.current[which]);
+  }
+
   return (
     <div className="hidden min-h-screen bg-[#f3eee6] md:block">
       <header className="bg-clay-deep text-paper">
@@ -120,65 +142,83 @@ export function DesktopMemberShell({ children }: { children: React.ReactNode }) 
             })}
           </nav>
 
-          <div ref={menuRef} className="flex items-center gap-2.5">
+          <div ref={menuRef} className="flex items-center gap-2">
             <Link
               href="/app/upgrade"
-              className="rounded-md bg-clay px-4 py-2 text-sm font-semibold text-paper shadow-[0_2px_4px_rgba(0,0,0,0.2)] hover:bg-[#d01f64]"
+              className="rounded bg-clay px-3 py-1.5 text-sm font-semibold text-paper shadow-[0_2px_4px_rgba(0,0,0,0.2)] hover:bg-[#d01f64]"
             >
               {t("upgrade")}
             </Link>
 
-            {/* Cupid “web/language” globe — opens language menu */}
-            <div className="relative">
+            {/* Cupid web/language control: globe + label + chevron, hover opens list */}
+            <div
+              className="relative"
+              onMouseEnter={() => {
+                cancelClose("lang");
+                openOnly("lang");
+              }}
+              onMouseLeave={() => scheduleClose("lang")}
+            >
               <button
                 type="button"
-                title={lang === "sw" ? t("swahili") : t("english")}
+                title={langLabel}
                 aria-label="Language"
                 aria-expanded={langOpen}
-                onClick={() => {
-                  setLangOpen((open) => !open);
-                  setProfileOpen(false);
-                  setSettingsOpen(false);
-                }}
-                className="grid h-9 w-9 place-items-center rounded-full text-paper/90 hover:bg-white/10"
+                onClick={() => (langOpen ? closeMenus() : openOnly("lang"))}
+                className="flex items-center rounded bg-black/80 px-2 py-1.5 text-sm text-paper hover:bg-black/90"
               >
                 <GlobeIcon />
+                <span className="mx-1 whitespace-nowrap">{langLabel}</span>
+                <span className={`inline-flex transition-transform ${langOpen ? "-rotate-90" : "rotate-90"}`}>
+                  <ChevronIcon />
+                </span>
               </button>
               {langOpen ? (
-                <MenuCard>
-                  <MenuButton
-                    onClick={() => {
-                      setLang("en");
-                      closeMenus();
-                    }}
-                  >
-                    {t("english")}
-                  </MenuButton>
-                  <MenuButton
-                    onClick={() => {
-                      setLang("sw");
-                      closeMenus();
-                    }}
-                  >
-                    {t("swahili")}
-                  </MenuButton>
-                </MenuCard>
+                <ul className="absolute left-0 top-full z-40 mt-0 min-w-[120%] list-none overflow-hidden p-0 pt-1 shadow-md">
+                  <li className="bg-white/80 hover:bg-white">
+                    <button
+                      type="button"
+                      className={`block w-full px-3 py-2 text-left text-sm leading-tight text-[#565656] ${lang === "en" ? "font-semibold" : ""}`}
+                      onClick={() => {
+                        setLang("en");
+                        closeMenus();
+                      }}
+                    >
+                      English
+                    </button>
+                  </li>
+                  <li className="bg-white/80 hover:bg-white">
+                    <button
+                      type="button"
+                      className={`block w-full px-3 py-2 text-left text-sm leading-tight text-[#565656] ${lang === "sw" ? "font-semibold" : ""}`}
+                      onClick={() => {
+                        setLang("sw");
+                        closeMenus();
+                      }}
+                    >
+                      Kiswahili
+                    </button>
+                  </li>
+                </ul>
               ) : null}
             </div>
 
-            {/* Cupid silhouette / profile photo — member menu */}
-            <div className="relative">
+            {/* Cupid silhouette / profile photo */}
+            <div
+              className="relative"
+              onMouseEnter={() => {
+                cancelClose("profile");
+                openOnly("profile");
+              }}
+              onMouseLeave={() => scheduleClose("profile")}
+            >
               <button
                 type="button"
                 title="My profile"
                 aria-label="My profile"
                 aria-expanded={profileOpen}
-                onClick={() => {
-                  setProfileOpen((open) => !open);
-                  setLangOpen(false);
-                  setSettingsOpen(false);
-                }}
-                className="h-9 w-9 overflow-hidden rounded-full bg-paper/20 ring-2 ring-paper/40"
+                onClick={() => openOnly("profile")}
+                className="h-9 w-9 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/50"
               >
                 {avatar ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -190,53 +230,56 @@ export function DesktopMemberShell({ children }: { children: React.ReactNode }) 
                 )}
               </button>
               {profileOpen ? (
-                <MenuCard>
-                  <MenuLink href="/app/profile" onClick={closeMenus}>
+                <ul className="absolute right-0 top-full z-40 mt-1 min-w-48 list-none overflow-hidden rounded-sm p-0 shadow-md">
+                  <MenuItem href="/app/profile" onClick={closeMenus}>
                     Edit profile
-                  </MenuLink>
-                  <MenuLink href="/app/profile" onClick={closeMenus}>
+                  </MenuItem>
+                  <MenuItem href="/app/profile" onClick={closeMenus}>
                     Photos
-                  </MenuLink>
-                  <MenuLink href="/app/settings" onClick={closeMenus}>
+                  </MenuItem>
+                  <MenuItem href="/app/settings" onClick={closeMenus}>
                     Account settings
-                  </MenuLink>
-                  <MenuButton onClick={() => void signOut()}>Sign out</MenuButton>
-                </MenuCard>
+                  </MenuItem>
+                  <MenuItemButton onClick={() => void signOut()}>Sign out</MenuItemButton>
+                </ul>
               ) : null}
             </div>
 
-            {/* Cupid gear — settings menu → Profile Settings */}
-            <div className="relative">
+            {/* Cupid gear → Profile Settings */}
+            <div
+              className="relative"
+              onMouseEnter={() => {
+                cancelClose("settings");
+                openOnly("settings");
+              }}
+              onMouseLeave={() => scheduleClose("settings")}
+            >
               <button
                 type="button"
                 title="Settings"
                 aria-label="Settings"
                 aria-expanded={settingsOpen}
-                onClick={() => {
-                  setSettingsOpen((open) => !open);
-                  setLangOpen(false);
-                  setProfileOpen(false);
-                }}
-                className="grid h-9 w-9 place-items-center rounded-full text-paper/90 hover:bg-white/10"
+                onClick={() => openOnly("settings")}
+                className={`grid h-9 w-9 place-items-center rounded text-paper ${settingsOpen ? "bg-black/80" : "bg-black/50 hover:bg-black/80"}`}
               >
                 <GearIcon />
               </button>
               {settingsOpen ? (
-                <MenuCard>
-                  <MenuLink href="/app/settings" onClick={closeMenus}>
+                <ul className="absolute right-0 top-full z-40 mt-1 min-w-48 list-none overflow-hidden rounded-sm p-0 shadow-md">
+                  <MenuItem href="/app/settings" onClick={closeMenus}>
                     Profile settings
-                  </MenuLink>
-                  <MenuLink href="/app/settings#privacy" onClick={closeMenus}>
+                  </MenuItem>
+                  <MenuItem href="/app/settings#privacy" onClick={closeMenus}>
                     Privacy
-                  </MenuLink>
-                  <MenuLink href="/app/settings#notifications" onClick={closeMenus}>
+                  </MenuItem>
+                  <MenuItem href="/app/settings#notifications" onClick={closeMenus}>
                     Notifications
-                  </MenuLink>
-                  <MenuLink href="/app/matches?tab=favorites" onClick={closeMenus}>
+                  </MenuItem>
+                  <MenuItem href="/app/matches?tab=favorites" onClick={closeMenus}>
                     Favorites
-                  </MenuLink>
-                  <MenuButton onClick={() => void signOut()}>Sign out</MenuButton>
-                </MenuCard>
+                  </MenuItem>
+                  <MenuItemButton onClick={() => void signOut()}>Sign out</MenuItemButton>
+                </ul>
               ) : null}
             </div>
           </div>
@@ -248,58 +291,54 @@ export function DesktopMemberShell({ children }: { children: React.ReactNode }) 
   );
 }
 
-function MenuCard({ children }: { children: React.ReactNode }) {
+function MenuItem({ href, onClick, children }: { href: string; onClick: () => void; children: React.ReactNode }) {
   return (
-    <div className="absolute right-0 z-30 mt-2 min-w-48 overflow-hidden rounded-md bg-ink py-1 text-sm text-paper shadow-lg ring-1 ring-white/10">
-      {children}
-    </div>
+    <li className="bg-white/90 hover:bg-white">
+      <Link href={href} onClick={onClick} className="block w-full px-3.5 py-2.5 text-left text-sm text-[#565656]">
+        {children}
+      </Link>
+    </li>
   );
 }
 
-function MenuLink({ href, onClick, children }: { href: string; onClick: () => void; children: React.ReactNode }) {
+function MenuItemButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
-    <Link href={href} onClick={onClick} className="block w-full px-3.5 py-2.5 text-left hover:bg-white/10">
-      {children}
-    </Link>
-  );
-}
-
-function MenuButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button type="button" onClick={onClick} className="block w-full px-3.5 py-2.5 text-left hover:bg-white/10">
-      {children}
-    </button>
+    <li className="bg-white/90 hover:bg-white">
+      <button type="button" onClick={onClick} className="block w-full px-3.5 py-2.5 text-left text-sm text-[#565656]">
+        {children}
+      </button>
+    </li>
   );
 }
 
 function GlobeIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M3 12h18M12 3c2.5 2.8 3.8 5.8 3.8 9S14.5 18.2 12 21c-2.5-2.8-3.8-5.8-3.8-9S9.5 5.8 12 3z" stroke="currentColor" strokeWidth="1.7" />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="shrink-0">
+      <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm7.5 9h-3.1a15.4 15.4 0 0 0-1.3-5 8.05 8.05 0 0 1 4.4 5zM12 4c.9 1.2 1.7 3.1 2.1 5.2H9.9C10.3 7.1 11.1 5.2 12 4zM4.5 13h3.1a15.4 15.4 0 0 0 1.3 5 8.05 8.05 0 0 1-4.4-5zm3.1-2H4.5a8.05 8.05 0 0 1 4.4-5 15.4 15.4 0 0 0-1.3 5zm2.3 0h4.2c-.4 2.1-1.2 4-2.1 5.2-.9-1.2-1.7-3.1-2.1-5.2zm4.2 2H9.9c.4 2.1 1.2 4 2.1 5.2.9-1.2 1.7-3.1 2.1-5.2zm.9 5a15.4 15.4 0 0 0 1.3-5h3.1a8.05 8.05 0 0 1-4.4 5z" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="shrink-0 opacity-90">
+      <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 1 1-1.4-1.4L14.6 12 9.3 6.7a1 1 0 0 1 0-1.4z" />
     </svg>
   );
 }
 
 function PersonIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M5 19c1.6-3.2 4-4.8 7-4.8s5.4 1.6 7 4.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z" />
     </svg>
   );
 }
 
 function GearIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z" stroke="currentColor" strokeWidth="1.7" />
-      <path
-        d="M19.4 13a7.8 7.8 0 0 0 .1-2l2-1.2-2-3.4-2.3.7a7.7 7.7 0 0 0-1.7-1L15 4h-4l-.5 2.1a7.7 7.7 0 0 0-1.7 1l-2.3-.7-2 3.4 2 1.2a7.8 7.8 0 0 0 0 2l-2 1.2 2 3.4 2.3-.7a7.7 7.7 0 0 0 1.7 1L11 20h4l.5-2.1a7.7 7.7 0 0 0 1.7-1l2.3.7 2-3.4-2-1.2z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M19.4 13a7.8 7.8 0 0 0 .1-2l2-1.2-2-3.4-2.3.7a7.7 7.7 0 0 0-1.7-1L15 4h-4l-.5 2.1a7.7 7.7 0 0 0-1.7 1l-2.3-.7-2 3.4 2 1.2a7.8 7.8 0 0 0 0 2l-2 1.2 2 3.4 2.3-.7a7.7 7.7 0 0 0 1.7 1L11 20h4l.5-2.1a7.7 7.7 0 0 0 1.7-1l2.3.7 2-3.4-2-1.2zM12 15.2a3.2 3.2 0 1 1 3.2-3.2 3.2 3.2 0 0 1-3.2 3.2z" />
     </svg>
   );
 }
