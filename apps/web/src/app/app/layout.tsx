@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { MemberNav } from "@/components/MemberNav";
 import { DesktopMemberShell } from "@/components/DesktopMemberShell";
+import { LanguageProvider } from "@/components/LanguageProvider";
 
 export default function MemberLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
+    <LanguageProvider>
       <div className="min-h-screen md:hidden">
         <header className="border-b border-line bg-clay-deep text-paper">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
@@ -23,6 +24,6 @@ export default function MemberLayout({ children }: { children: React.ReactNode }
       </div>
 
       <DesktopMemberShell>{children}</DesktopMemberShell>
-    </>
+    </LanguageProvider>
   );
 }

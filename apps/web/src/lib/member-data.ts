@@ -16,7 +16,30 @@ export type DiscoveryCard = {
   photo_verified?: boolean | null;
   age_preference_min?: number | null;
   age_preference_max?: number | null;
+  gender?: string | null;
+  seeking_genders?: string[] | null;
+  photo_count?: number;
+  like_count?: number;
+  body_type?: string | null;
+  education?: string | null;
+  photo_verified_at?: string | null;
   created_at?: string | null;
+};
+
+export type HomeBoard = {
+  name: string;
+  completion: number;
+  criteriaComplete: boolean;
+  plus: boolean;
+  messages: number;
+  interests: number;
+  views: number;
+  favorites: number;
+  city: string | null;
+  intent: string;
+  mutualIds: string[];
+  reverseIds: string[];
+  outgoingLikeIds: string[];
 };
 
 export type InboxCounts = {
@@ -64,6 +87,10 @@ export type OwnProfile = {
   communication_boundaries: string | null;
   age_preference_min: number;
   age_preference_max: number;
+  gender?: string | null;
+  seeking_genders?: string[];
+  education?: string | null;
+  body_type?: string | null;
   date_of_birth: string | null;
   blur_until_mutual?: boolean;
 };
@@ -71,6 +98,22 @@ export type OwnProfile = {
 export function intentLabel(id: string | null | undefined): string {
   if (!id) return "Open to connection";
   return product.relationshipIntents.find((intent) => intent.id === id)?.label ?? id;
+}
+
+export function genderLabel(id: string | null | undefined): string {
+  if (!id) return "";
+  return product.genders.find((gender) => gender.id === id)?.label ?? id;
+}
+
+export function seekingLine(card: Pick<DiscoveryCard, "seeking_genders" | "age_preference_min" | "age_preference_max" | "relationship_intent">): string {
+  const people = (card.seeking_genders ?? []).map((id) => genderLabel(id)).filter(Boolean);
+  const ages =
+    card.age_preference_min && card.age_preference_max
+      ? `${card.age_preference_min}–${card.age_preference_max}`
+      : "";
+  if (people.length > 0) return `${people.join(", ")}${ages ? `, ${ages}` : ""}`;
+  const intent = intentLabel(card.relationship_intent);
+  return ages ? `${intent}, ${ages}` : intent;
 }
 
 /** Shared optional video room (Jitsi). Same match id → same room for both people. */
@@ -110,14 +153,26 @@ export async function loadDiscoveryCards(client: SupabaseClient, userId: string)
   const { data, error } = await client.rpc("discovery_cards");
   const fromRpc = error ? [] : ((data as DiscoveryCard[]) ?? []);
 
-  const { data: profiles } = await client
+  const profileColumns =
+    "user_id, display_name, city, bio, relationship_intent, relationship_intents, age_preference_min, age_preference_max, gender, seeking_genders, body_type, education, is_online, last_seen_at, created_at, photo_verified_at";
+  const baseColumns =
+    "user_id, display_name, city, bio, relationship_intent, relationship_intents, age_preference_min, age_preference_max, is_online, last_seen_at, created_at, photo_verified_at";
+  const firstProfiles = await client
     .from("profiles")
-    .select(
-      "user_id, display_name, city, bio, relationship_intent, relationship_intents, age_preference_min, age_preference_max, is_online, last_seen_at, created_at, photo_verified_at",
-    )
+    .select(profileColumns)
     .neq("user_id", userId)
     .eq("onboarding_completed", true)
     .eq("account_paused", false);
+  const profiles = firstProfiles.error
+    ? (
+        await client
+          .from("profiles")
+          .select(baseColumns)
+          .neq("user_id", userId)
+          .eq("onboarding_completed", true)
+          .eq("account_paused", false)
+      ).data
+    : firstProfiles.data;
 
   const byId = new Map(fromRpc.map((card) => [card.user_id, card]));
   const rows = ((profiles as Array<Record<string, unknown>> | null) ?? []).map((profile) => {
@@ -138,17 +193,99 @@ export async function loadDiscoveryCards(client: SupabaseClient, userId: string)
       photo_verified: Boolean(rpc?.photo_verified ?? profile.photo_verified_at),
       age_preference_min: (profile.age_preference_min as number | null) ?? null,
       age_preference_max: (profile.age_preference_max as number | null) ?? null,
+      gender: (profile.gender as string | null) ?? null,
+      seeking_genders: Array.isArray(profile.seeking_genders) ? profile.seeking_genders.map(String) : [],
+      body_type: (profile.body_type as string | null) ?? null,
+      education: (profile.education as string | null) ?? null,
+      photo_verified_at: (profile.photo_verified_at as string | null) ?? null,
       created_at: (profile.created_at as string | null) ?? null,
     } satisfies DiscoveryCard;
   });
 
   const list = rows.length > 0 ? rows : fromRpc;
-  return Promise.all(
-    list.map(async (card) => ({
-      ...card,
-      photoUrl: await signedPhoto(client, card.photo_path),
-    })),
+  const { data: stats } = await client.rpc("discovery_card_stats");
+  const statById = new Map(
+    ((stats as Array<{ user_id: string; photo_count: number; like_count: number }> | null) ?? []).map((row) => [
+      row.user_id,
+      row,
+    ]),
   );
+  return Promise.all(
+    list.map(async (card) => {
+      const stat = statById.get(card.user_id);
+      return {
+        ...card,
+        photo_count: stat?.photo_count ?? (card.photo_path ? 1 : 0),
+        like_count: stat?.like_count ?? 0,
+        photoUrl: await signedPhoto(client, card.photo_path),
+      };
+    }),
+  );
+}
+
+export async function loadHomeBoard(client: SupabaseClient, userId: string): Promise<HomeBoard> {
+  const profileSelect =
+    "display_name, city, bio, gender, seeking_genders, relationship_intent, premium_until, age_preference_min, age_preference_max";
+  let profile: Record<string, unknown> | null = null;
+  const first = await client.from("profiles").select(profileSelect).eq("user_id", userId).maybeSingle();
+  if (first.error) {
+    const fallback = await client
+      .from("profiles")
+      .select("display_name, city, bio, relationship_intent, premium_until, age_preference_min, age_preference_max")
+      .eq("user_id", userId)
+      .maybeSingle();
+    profile = (fallback.data as Record<string, unknown> | null) ?? null;
+  } else {
+    profile = (first.data as Record<string, unknown> | null) ?? null;
+  }
+
+  const [{ count: photos }, { data: incoming }, { data: outgoing }, { data: matches }, { count: favorites }, { count: views }, inbox] =
+    await Promise.all([
+      client.from("profile_photos").select("id", { count: "exact", head: true }).eq("user_id", userId),
+      client.from("likes").select("from_user").eq("to_user", userId),
+      client.from("likes").select("to_user").eq("from_user", userId),
+      client.from("matches").select("user_a, user_b").or(`user_a.eq.${userId},user_b.eq.${userId}`).is("unmatched_at", null),
+      client.from("favorites").select("favorite_id", { count: "exact", head: true }).eq("owner_id", userId),
+      client.from("profile_views").select("viewer_id", { count: "exact", head: true }).eq("viewed_id", userId),
+      loadInboxCounts(client, userId),
+    ]);
+
+  const seeking = Array.isArray(profile?.seeking_genders) ? profile.seeking_genders.map(String) : [];
+  const checks = [
+    Boolean(profile?.display_name),
+    Boolean(profile?.city),
+    Boolean(profile?.bio),
+    Boolean(profile?.gender),
+    seeking.length > 0,
+    (photos ?? 0) > 0,
+  ];
+  const completion = Math.round((checks.filter(Boolean).length / checks.length) * 100);
+  const criteriaComplete = Boolean(profile?.city) && Boolean(profile?.gender) && seeking.length > 0 && (photos ?? 0) > 0;
+  const until = profile?.premium_until ? new Date(String(profile.premium_until)).getTime() : 0;
+  const mutualIds = ((matches as Array<{ user_a: string; user_b: string }> | null) ?? []).map((row) =>
+    row.user_a === userId ? row.user_b : row.user_a,
+  );
+  const mutual = new Set(mutualIds);
+  const outgoingLikeIds = ((outgoing as Array<{ to_user: string }> | null) ?? []).map((row) => row.to_user);
+  const reverseIds = ((incoming as Array<{ from_user: string }> | null) ?? [])
+    .map((row) => row.from_user)
+    .filter((id) => !mutual.has(id));
+
+  return {
+    name: String(profile?.display_name ?? "there").split(" ")[0] || "there",
+    completion,
+    criteriaComplete,
+    plus: until > Date.now(),
+    messages: inbox.messages,
+    interests: ((incoming as Array<unknown> | null) ?? []).length,
+    views: views ?? 0,
+    favorites: favorites ?? 0,
+    city: (profile?.city as string | null) ?? null,
+    intent: String(profile?.relationship_intent ?? "unsure"),
+    mutualIds,
+    reverseIds,
+    outgoingLikeIds,
+  };
 }
 
 export async function loadInboxCounts(client: SupabaseClient, userId: string): Promise<InboxCounts> {
@@ -350,16 +487,17 @@ export async function loadReceivedLikes(client: SupabaseClient, userId: string):
 }
 
 export async function loadOwnProfile(client: SupabaseClient, userId: string): Promise<OwnProfile | null> {
-  const [{ data: profile }, { data: identity }] = await Promise.all([
-    client
-      .from("profiles")
-      .select(
-        "display_name, city, bio, relationship_intent, languages, interests, family_goals, children_preference, communication_boundaries, age_preference_min, age_preference_max, blur_until_mutual",
-      )
-      .eq("user_id", userId)
-      .maybeSingle(),
+  const full =
+    "display_name, city, bio, relationship_intent, languages, interests, family_goals, children_preference, communication_boundaries, age_preference_min, age_preference_max, gender, seeking_genders, education, body_type, blur_until_mutual";
+  const basic =
+    "display_name, city, bio, relationship_intent, languages, interests, family_goals, children_preference, communication_boundaries, age_preference_min, age_preference_max, blur_until_mutual";
+  const [{ data: identity }, profileResult] = await Promise.all([
     client.from("private_identity").select("date_of_birth").eq("user_id", userId).maybeSingle(),
+    client.from("profiles").select(full).eq("user_id", userId).maybeSingle(),
   ]);
+  const profile = (profileResult.error
+    ? (await client.from("profiles").select(basic).eq("user_id", userId).maybeSingle()).data
+    : profileResult.data) as Record<string, unknown> | null;
   if (!profile) return null;
   return {
     display_name: String(profile.display_name ?? ""),
@@ -373,6 +511,10 @@ export async function loadOwnProfile(client: SupabaseClient, userId: string): Pr
     communication_boundaries: (profile.communication_boundaries as string | null) ?? null,
     age_preference_min: Number(profile.age_preference_min ?? 18),
     age_preference_max: Number(profile.age_preference_max ?? 80),
+    gender: (profile.gender as string | null) ?? null,
+    seeking_genders: Array.isArray(profile.seeking_genders) ? profile.seeking_genders.map(String) : [],
+    education: (profile.education as string | null) ?? null,
+    body_type: (profile.body_type as string | null) ?? null,
     date_of_birth: (identity?.date_of_birth as string | null) ?? null,
     blur_until_mutual: Boolean(profile.blur_until_mutual),
   };

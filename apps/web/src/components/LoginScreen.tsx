@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export function LoginScreen() {
@@ -15,6 +15,12 @@ export function LoginScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
+  const [lang, setLang] = useState<"en" | "sw">("en");
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("wendo.lang");
+    if (saved === "sw" || saved === "en") setLang(saved);
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -107,16 +113,32 @@ export function LoginScreen() {
               className="inline-flex items-center gap-2 rounded-md bg-ink/80 px-3 py-2 text-sm text-paper ring-1 ring-white/15"
             >
               <GlobeIcon />
-              English
+              {lang === "sw" ? "Kiswahili" : "English"}
               <ChevronIcon />
             </button>
             {langOpen ? (
               <div className="absolute right-0 z-20 mt-1 min-w-full rounded-md bg-ink/95 py-1 text-sm ring-1 ring-white/15">
-                <button type="button" className="block w-full px-3 py-2 text-left hover:bg-white/10" onClick={() => setLangOpen(false)}>
+                <button
+                  type="button"
+                  className="block w-full px-3 py-2 text-left hover:bg-white/10"
+                  onClick={() => {
+                    window.localStorage.setItem("wendo.lang", "en");
+                    setLang("en");
+                    setLangOpen(false);
+                  }}
+                >
                   English
                 </button>
-                <button type="button" className="block w-full px-3 py-2 text-left text-paper/70" disabled>
-                  Kiswahili soon
+                <button
+                  type="button"
+                  className="block w-full px-3 py-2 text-left hover:bg-white/10"
+                  onClick={() => {
+                    window.localStorage.setItem("wendo.lang", "sw");
+                    setLang("sw");
+                    setLangOpen(false);
+                  }}
+                >
+                  Kiswahili
                 </button>
               </div>
             ) : null}

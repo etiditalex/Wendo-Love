@@ -1,22 +1,25 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { loadInboxCounts, loadOwnAvatar, markPresence } from "@/lib/member-data";
-
-const topLinks = [
-  { href: "/app", label: "Home" },
-  { href: "/app/messages", label: "Messages", badge: "messages" as const },
-  { href: "/app/matches", label: "Activity", badge: "likes" as const },
-];
+import { useLang } from "@/components/LanguageProvider";
 
 export function DesktopMemberShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { lang, setLang, t } = useLang();
   const [likes, setLikes] = useState(0);
   const [messages, setMessages] = useState(0);
   const [avatar, setAvatar] = useState<string | null>(null);
+  const [langOpen, setLangOpen] = useState(false);
+
+  const topLinks = [
+    { href: "/app", label: t("home") },
+    { href: "/app/messages", label: t("messages"), badge: "messages" as const },
+    { href: "/app/matches", label: t("activity"), badge: "likes" as const },
+  ];
 
   useEffect(() => {
     const supabase = createClient();
@@ -76,14 +79,45 @@ export function DesktopMemberShell({ children }: { children: React.ReactNode }) 
 
           <div className="flex items-center gap-3">
             <Link
-              href="/app/meet"
+              href="/app/upgrade"
               className="rounded-md bg-clay px-4 py-2 text-sm font-semibold text-paper shadow-[0_2px_4px_rgba(0,0,0,0.2)] hover:bg-[#d01f64]"
             >
-              Meet safely
+              {t("upgrade")}
             </Link>
-            <Link href="/app/learn" title="Learn" className="grid h-9 w-9 place-items-center rounded-full text-paper/90 hover:bg-white/10">
-              <GlobeIcon />
-            </Link>
+            <div className="relative">
+              <button
+                type="button"
+                title={lang === "sw" ? t("swahili") : t("english")}
+                onClick={() => setLangOpen((open) => !open)}
+                className="grid h-9 w-9 place-items-center rounded-full text-paper/90 hover:bg-white/10"
+              >
+                <GlobeIcon />
+              </button>
+              {langOpen ? (
+                <div className="absolute right-0 z-20 mt-1 min-w-36 rounded-md bg-ink py-1 text-sm text-paper shadow-lg ring-1 ring-white/10">
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2 text-left hover:bg-white/10"
+                    onClick={() => {
+                      setLang("en");
+                      setLangOpen(false);
+                    }}
+                  >
+                    {t("english")}
+                  </button>
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2 text-left hover:bg-white/10"
+                    onClick={() => {
+                      setLang("sw");
+                      setLangOpen(false);
+                    }}
+                  >
+                    {t("swahili")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <Link href="/app/profile" className="h-9 w-9 overflow-hidden rounded-full bg-paper/20 ring-2 ring-paper/40">
               {avatar ? (
                 // eslint-disable-next-line @next/next/no-img-element

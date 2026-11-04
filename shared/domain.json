@@ -3,6 +3,11 @@
   "tagline": "Love. Dignity. Connection.",
   "minimumAge": 18,
   "defaultCountry": "KE",
+  "genders": [
+    { "id": "woman", "label": "Women" },
+    { "id": "man", "label": "Men" },
+    { "id": "nonbinary", "label": "Nonbinary people" }
+  ],
   "relationshipIntents": [
     { "id": "marriage", "label": "Marriage" },
     { "id": "long_term", "label": "Long-term partnership" },

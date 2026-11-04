@@ -250,6 +250,10 @@ export function ProfilePanel() {
       communication_boundaries: String(form.get("boundaries") ?? "") || null,
       age_preference_min: Number(form.get("ageMin") ?? 18),
       age_preference_max: Number(form.get("ageMax") ?? 80),
+      gender: String(form.get("gender") ?? "") || null,
+      seeking_genders: form.getAll("seeking").map(String),
+      education: String(form.get("education") ?? "") || null,
+      body_type: String(form.get("bodyType") ?? "") || null,
       onboarding_completed: true,
     };
 
@@ -262,7 +266,17 @@ export function ProfilePanel() {
       setMessage(identityError.message);
       return;
     }
-    const { error: profileError } = await supabase.from("profiles").upsert(next);
+    const saved = await supabase.from("profiles").upsert(next);
+    let profileError = saved.error;
+    if (profileError && /gender|seeking_genders|education|schema cache|column/i.test(profileError.message)) {
+      const { gender: _gender, seeking_genders: _seeking, education: _education, ...rest } = next;
+      const retry = await supabase.from("profiles").upsert(rest);
+      profileError = retry.error;
+      if (!profileError) {
+        setMessage("Profile saved. Apply the latest database migration before gender, seeking, and education can be stored.");
+        return;
+      }
+    }
     if (profileError) {
       setMessage(profileError.message);
       return;
@@ -286,6 +300,10 @@ export function ProfilePanel() {
       communication_boundaries: next.communication_boundaries,
       age_preference_min: next.age_preference_min,
       age_preference_max: next.age_preference_max,
+      gender: next.gender,
+      seeking_genders: next.seeking_genders,
+      education: next.education,
+      body_type: next.body_type,
       date_of_birth: dateOfBirth,
     });
   }
@@ -303,6 +321,10 @@ export function ProfilePanel() {
     boundaries: profile?.communication_boundaries || "",
     ageMin: String(profile?.age_preference_min ?? 18),
     ageMax: String(profile?.age_preference_max ?? 80),
+    gender: profile?.gender || "",
+    seeking: profile?.seeking_genders ?? [],
+    education: profile?.education || "",
+    bodyType: profile?.body_type || "",
   };
 
   async function onPhoto(event: ChangeEvent<HTMLInputElement>) {
@@ -324,6 +346,44 @@ export function ProfilePanel() {
       <TextField label="Display name" name="displayName" defaultValue={values.displayName} required />
       <TextField label="Date of birth" name="dateOfBirth" type="date" defaultValue={values.dateOfBirth} required />
       <TextField label="City or broad area" name="city" defaultValue={values.city} />
+      <label className="grid gap-1 text-sm">
+        <span className="font-semibold">I am</span>
+        <select name="gender" defaultValue={values.gender} className="rounded-xl border border-line bg-paper px-3 py-2">
+          <option value="">Prefer not to say yet</option>
+          <option value="woman">A woman</option>
+          <option value="man">A man</option>
+          <option value="nonbinary">Nonbinary</option>
+        </select>
+      </label>
+      <fieldset className="grid gap-2 text-sm">
+        <legend className="font-semibold">I hope to meet</legend>
+        {product.genders.map((gender) => (
+          <label key={gender.id} className="flex items-center gap-2">
+            <input type="checkbox" name="seeking" value={gender.id} defaultChecked={values.seeking.includes(gender.id)} />
+            {gender.label}
+          </label>
+        ))}
+      </fieldset>
+      <label className="grid gap-1 text-sm">
+        <span className="font-semibold">Education</span>
+        <select name="education" defaultValue={values.education} className="rounded-xl border border-line bg-paper px-3 py-2">
+          <option value="">Prefer not to say</option>
+          <option value="secondary">Secondary</option>
+          <option value="diploma">Diploma</option>
+          <option value="degree">Degree</option>
+          <option value="postgraduate">Postgraduate</option>
+        </select>
+      </label>
+      <label className="grid gap-1 text-sm">
+        <span className="font-semibold">Body style</span>
+        <select name="bodyType" defaultValue={values.bodyType} className="rounded-xl border border-line bg-paper px-3 py-2">
+          <option value="">Prefer not to say</option>
+          <option value="slim">Slim</option>
+          <option value="average">Average</option>
+          <option value="athletic">Athletic</option>
+          <option value="curvy">Curvy</option>
+        </select>
+      </label>
       <label className="grid gap-1 text-sm">
         <span className="font-semibold">Relationship intent</span>
         <select
