@@ -1,0 +1,35 @@
+{
+  "product": "Wendo Love",
+  "tagline": "Love. Dignity. Connection.",
+  "minimumAge": 18,
+  "defaultCountry": "KE",
+  "relationshipIntents": [
+    { "id": "marriage", "label": "Marriage" },
+    { "id": "long_term", "label": "Long-term partnership" },
+    { "id": "companionship", "label": "Companionship" },
+    { "id": "friendship", "label": "Friendship" },
+    { "id": "unsure", "label": "Still deciding" }
+  ],
+  "hivStatusOptions": [
+    { "id": "living_with_hiv", "label": "Living with HIV" },
+    { "id": "hiv_negative", "label": "HIV-negative" },
+    { "id": "prefer_not_to_say", "label": "Prefer not to say" },
+    { "id": "not_sure", "label": "Not sure" }
+  ],
+  "disclosurePreferences": [
+    { "id": "never", "label": "Do not offer sharing" },
+    { "id": "when_i_choose", "label": "Only when I choose, with a mutual match" }
+  ],
+  "reportReasons": [
+    "harassment",
+    "scam",
+    "impersonation",
+    "outing_threat",
+    "coercion",
+    "spam",
+    "other"
+  ],
+  "consentTypes": ["terms", "privacy", "community_rules", "optional_health"],
+  "consentVersion": "2026-10",
+  "journey": ["join", "profile", "discover", "connect", "meet", "learn", "support"]
+}
