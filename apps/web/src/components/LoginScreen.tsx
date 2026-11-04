@@ -82,14 +82,16 @@ export function LoginScreen() {
   }
 
   return (
-    <div className="relative min-h-dvh bg-ink text-paper">
+    <div className="relative min-h-dvh overflow-hidden text-paper">
+      {/* Fallback only if the photo fails; image sits above this, not behind it. */}
+      <div className="absolute inset-0 bg-ink" aria-hidden />
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/hero.jpg"
         alt=""
-        className="fixed inset-0 -z-10 size-full object-cover object-[50%_28%] brightness-[0.55] contrast-[1.05]"
+        className="absolute inset-0 size-full object-cover object-[50%_28%] brightness-[0.55] contrast-[1.05]"
       />
-      <div className="fixed inset-0 -z-10 bg-gradient-to-b from-ink/55 via-ink/35 to-ink/70" />
+      <div className="absolute inset-0 bg-gradient-to-b from-ink/55 via-ink/35 to-ink/70" aria-hidden />
 
       <div className="relative z-10 flex min-h-dvh flex-col">
         <header className="flex items-center justify-between px-4 py-4 sm:px-6 lg:px-10">
