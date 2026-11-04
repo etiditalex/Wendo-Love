@@ -952,7 +952,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                   ),
                 ),
                 const SizedBox(width: 4),
-                _RoundButton(icon: Icons.public, tooltip: 'Open the website', onPressed: _openWeb),
+                _RoundButton(icon: Icons.public, tooltip: 'Open Wendo on the web', onPressed: _openWeb),
                 const SizedBox(width: 8),
                 _RoundButton(icon: Icons.tune, tooltip: 'Matching preferences', onPressed: _openPreferences),
               ],

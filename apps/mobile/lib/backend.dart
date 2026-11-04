@@ -2,10 +2,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 bool supabaseReady = false;
 
-/// Public website. Override with --dart-define=WEB_APP_URL=... for a phone on the same network.
+/// Public website opened by the Home globe/web icon (same role as Cupid’s site link).
+/// Override with --dart-define=WEB_APP_URL=... (production Vercel URL or LAN next server).
 const webAppUrl = String.fromEnvironment(
   'WEB_APP_URL',
-  defaultValue: 'http://localhost:3000',
+  defaultValue: 'https://wendo-love.vercel.app',
 );
 
 SupabaseClient? get supabase =>

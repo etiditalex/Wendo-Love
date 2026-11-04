@@ -11,7 +11,7 @@ const items = [
   { href: "/app/meet", label: "Meet safely" },
   { href: "/app/learn", label: "Learn" },
   { href: "/app/support", label: "Support" },
-  { href: "/app/settings", label: "Privacy" },
+  { href: "/app/settings", label: "Settings" },
 ];
 
 export function MemberNav() {
