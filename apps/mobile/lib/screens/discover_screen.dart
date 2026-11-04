@@ -2,9 +2,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:go_router/go_router.dart';
 import 'package:upendo_pamoja/backend.dart';
 import 'package:upendo_pamoja/connect.dart';
 import 'package:upendo_pamoja/domain.dart';
+import 'package:upendo_pamoja/i18n.dart';
 import 'package:upendo_pamoja/place_picker.dart';
 import 'package:upendo_pamoja/places.dart';
 import 'package:upendo_pamoja/privacy_media.dart';
@@ -19,26 +21,44 @@ const _inkSoft = Color(0xFF44403C);
 const _line = Color(0xFFE7DCCB);
 const _mute = Color(0xFFA8A29E);
 
-enum DiscoverMode { forYou, online, newest, latestPhotos, inThisArea, mutual }
+enum DiscoverMode { forYou, mutual, reverse, online, popular, newest, latestPhotos, inThisArea }
 
 /// Home top surface: normal browse, or Video (see + tap to call).
 enum HomeSurface { browse, video }
 
-const _modeLabels = {
-  DiscoverMode.forYou: 'For you',
-  DiscoverMode.online: 'Online',
-  DiscoverMode.newest: 'Newest',
-  DiscoverMode.latestPhotos: 'Latest photos',
-  DiscoverMode.inThisArea: 'In this area',
-  DiscoverMode.mutual: 'Mutual matches',
-};
+String _modeLabel(DiscoverMode mode) {
+  switch (mode) {
+    case DiscoverMode.forYou:
+      return t('matches');
+    case DiscoverMode.mutual:
+      return t('mutual');
+    case DiscoverMode.reverse:
+      return t('reverse');
+    case DiscoverMode.online:
+      return t('online');
+    case DiscoverMode.popular:
+      return t('popular');
+    case DiscoverMode.newest:
+      return t('newest');
+    case DiscoverMode.latestPhotos:
+      return t('latestPhotos');
+    case DiscoverMode.inThisArea:
+      return t('inArea');
+  }
+}
 
 const _chipModes = [
   DiscoverMode.forYou,
+  DiscoverMode.mutual,
+  DiscoverMode.reverse,
   DiscoverMode.online,
+  DiscoverMode.popular,
   DiscoverMode.newest,
+  DiscoverMode.latestPhotos,
   DiscoverMode.inThisArea,
 ];
+
+const _pageSize = 35;
 
 /// Tapping the home icon asks the open Home screen to load profiles again.
 final ValueNotifier<int> discoverReload = ValueNotifier<int>(0);
@@ -56,6 +76,14 @@ class DiscoverPerson {
     this.lastSeen,
     this.online = false,
     this.photoVerified = false,
+    this.agePrefMin,
+    this.agePrefMax,
+    this.seekingGenders = const [],
+    this.bodyType,
+    this.education,
+    this.photoCount = 0,
+    this.likeCount = 0,
+    this.createdAt,
   });
 
   final String userId;
@@ -69,8 +97,25 @@ class DiscoverPerson {
   final DateTime? lastSeen;
   final bool online;
   final bool photoVerified;
+  final int? agePrefMin;
+  final int? agePrefMax;
+  final List<String> seekingGenders;
+  final String? bodyType;
+  final String? education;
+  int photoCount;
+  int likeCount;
+  final DateTime? createdAt;
   bool likedYou = false;
   Uint8List? photo;
+
+  String get seeking {
+    return seekingLine(
+      seekingGenders: seekingGenders,
+      ageFrom: agePrefMin ?? 18,
+      ageTo: agePrefMax ?? 80,
+      intent: intent,
+    );
+  }
 }
 
 class DiscoverScreen extends StatefulWidget {
@@ -89,25 +134,49 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
   Set<String> _liked = {};
   Set<String> _likedYou = {};
   Set<String> _mutual = {};
+  Set<String> _reverse = {};
   Set<String> _passed = {};
   Map<String, String> _matchIds = {};
+  Set<String> _favorites = {};
+  InboxCounts _counts = const InboxCounts(likes: 0, messages: 0);
   bool _loading = true;
-  String? _note;
   int _page = 0;
+  String _bodyFilter = '';
+  String _educationFilter = '';
   late final AnimationController _pulse;
+
+  bool get _listsOpen => ProfileDraft.hasPlus || ProfileDraft.matchCriteriaComplete;
+
+  int get _completionPercent {
+    final checks = [
+      JoinDraft.displayName.trim().isNotEmpty,
+      ProfileDraft.city.trim().isNotEmpty,
+      ProfileDraft.gender?.isNotEmpty == true,
+      ProfileDraft.seekingGenders.isNotEmpty,
+      ProfileDraft.photo != null,
+    ];
+    final done = checks.where((item) => item).length;
+    return ((done / checks.length) * 100).round();
+  }
 
   @override
   void initState() {
     super.initState();
     _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))..repeat(reverse: true);
     discoverReload.addListener(_load);
+    appLang.addListener(_onLang);
     Future<void>.microtask(_load);
+  }
+
+  void _onLang() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     _pulse.dispose();
     discoverReload.removeListener(_load);
+    appLang.removeListener(_onLang);
     super.dispose();
   }
 
@@ -132,13 +201,15 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
       setState(() {
         _loading = false;
         _people = [];
-        _note = null;
       });
       return;
     }
     try {
       try {
         await ensureDiscoverableProfile();
+      } catch (_) {}
+      try {
+        await loadOwnProfileDetails();
       } catch (_) {}
       List<DiscoverPerson> fromCards = [];
       try {
@@ -152,6 +223,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
       }
       if (people.isEmpty) people = fromCards;
       final cardsById = {for (final person in fromCards) person.userId: person};
+      final stats = await loadDiscoveryCardStats();
       people = [
         for (final person in people)
           DiscoverPerson(
@@ -166,11 +238,20 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
             lastSeen: person.lastSeen ?? cardsById[person.userId]?.lastSeen,
             online: person.online || (cardsById[person.userId]?.online ?? false),
             photoVerified: person.photoVerified || (cardsById[person.userId]?.photoVerified ?? false),
+            agePrefMin: person.agePrefMin,
+            agePrefMax: person.agePrefMax,
+            seekingGenders: person.seekingGenders,
+            bodyType: person.bodyType,
+            education: person.education,
+            photoCount: stats[person.userId]?.photoCount ?? person.photoCount,
+            likeCount: stats[person.userId]?.likeCount ?? person.likeCount,
+            createdAt: person.createdAt,
           ),
       ];
       final liked = <String>{};
       final likedYou = <String>{};
       final mutual = <String>{};
+      final reverse = <String>{};
       final matchIds = <String, String>{};
       final passed = await loadPassedIds();
       people = [for (final person in people) if (!passed.contains(person.userId)) person];
@@ -181,7 +262,10 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
         }
         final received = await client.from('likes').select('from_user').eq('to_user', user.id);
         for (final row in received) {
-          if (row['from_user'] is String) likedYou.add(row['from_user'] as String);
+          if (row['from_user'] is String) {
+            likedYou.add(row['from_user'] as String);
+            if (!liked.contains(row['from_user'])) reverse.add(row['from_user'] as String);
+          }
         }
         List<dynamic> matchRows = [];
         try {
@@ -216,11 +300,18 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
         _liked = liked;
         _likedYou = likedYou;
         _mutual = mutual;
+        _reverse = reverse;
         _passed = passed;
         _matchIds = matchIds;
         _loading = false;
-        _note = null;
         _page = 0;
+      });
+      final counts = await loadInboxCounts();
+      final favoriteIds = await loadFavoriteIds();
+      if (!mounted) return;
+      setState(() {
+        _counts = counts;
+        _favorites = favoriteIds;
       });
       await Future.wait([
         _fillPhotos(people),
@@ -230,7 +321,6 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _note = null;
       });
     }
   }
@@ -296,11 +386,13 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
   }
 
   Future<List<DiscoverPerson>> _loadFinishedProfiles(dynamic client, String userId) async {
+    const rich =
+        'user_id, display_name, city, relationship_intent, relationship_intents, presence, age_preference_min, age_preference_max, gender, seeking_genders, body_type, education, is_online, last_seen_at, photo_verified_at, created_at';
     const detailed = 'user_id, display_name, city, relationship_intent, relationship_intents, presence';
     try {
       final rows = await client
           .from('profiles')
-          .select('$detailed, is_online, last_seen_at, photo_verified_at')
+          .select(rich)
           .neq('user_id', userId)
           .eq('onboarding_completed', true)
           .eq('account_paused', false);
@@ -309,7 +401,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
     try {
       final rows = await client
           .from('profiles')
-          .select('$detailed, is_online, last_seen_at')
+          .select('$detailed, is_online, last_seen_at, photo_verified_at')
           .neq('user_id', userId)
           .eq('onboarding_completed', true)
           .eq('account_paused', false);
@@ -342,10 +434,20 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
         if (item is String) intents.add(item);
       }
     }
+    final seeking = <String>[];
+    final rawSeeking = row['seeking_genders'];
+    if (rawSeeking is List) {
+      for (final item in rawSeeking) {
+        if (item is String) seeking.add(item);
+      }
+    }
     final age = row['age_years'];
     final photo = row['photo_path'];
     final seen = row['last_seen_at'];
     final verifiedAt = row['photo_verified_at'];
+    final created = row['created_at'];
+    final ageMin = row['age_preference_min'];
+    final ageMax = row['age_preference_max'];
     return DiscoverPerson(
       userId: '${row['user_id']}',
       name: (row['display_name'] as String?)?.trim().isNotEmpty == true ? row['display_name'] as String : 'Member',
@@ -358,11 +460,38 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
       lastSeen: seen is String ? DateTime.tryParse(seen) : null,
       online: row['is_online'] == true,
       photoVerified: row['photo_verified'] == true || verifiedAt != null,
+      agePrefMin: ageMin is int ? ageMin : (ageMin is num ? ageMin.toInt() : null),
+      agePrefMax: ageMax is int ? ageMax : (ageMax is num ? ageMax.toInt() : null),
+      seekingGenders: seeking,
+      bodyType: row['body_type'] is String ? row['body_type'] as String : null,
+      education: row['education'] is String ? row['education'] as String : null,
+      createdAt: created is String ? DateTime.tryParse(created) : null,
     );
+  }
+
+  int _relevance(DiscoverPerson person) {
+    var score = 0;
+    final city = ProfileDraft.city.trim().toLowerCase();
+    if (city.isNotEmpty && person.city.toLowerCase() == city) score += 30;
+    final intent = ProfileDraft.chosenIntentIds.isNotEmpty
+        ? ProfileDraft.chosenIntentIds.first
+        : JoinDraft.relationshipIntent;
+    if (intent.isNotEmpty && (person.intent == intent || person.intents.contains(intent))) score += 20;
+    if (lastSeenLabel(lastSeen: person.lastSeen, online: person.online) == 'Online') score += 15;
+    if ((person.photoPath != null && person.photoPath!.isNotEmpty) || person.photo != null) score += 10;
+    if (person.photoVerified) score += 5;
+    final created = person.createdAt;
+    if (created != null) {
+      final days = DateTime.now().difference(created).inDays;
+      score += (8 - days).clamp(0, 8);
+    }
+    return score;
   }
 
   List<DiscoverPerson> get _visible {
     final city = ProfileDraft.city.trim().toLowerCase();
+    final lockedList = (_mode == DiscoverMode.mutual || _mode == DiscoverMode.reverse) && !_listsOpen;
+    if (lockedList) return [];
     final list = _people.where((person) {
       if (_passed.contains(person.userId)) return false;
       if (_mode == DiscoverMode.online && lastSeenLabel(lastSeen: person.lastSeen, online: person.online) != 'Online') {
@@ -372,19 +501,51 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
         return false;
       }
       if (_mode == DiscoverMode.mutual && !_mutual.contains(person.userId)) return false;
+      if (_mode == DiscoverMode.reverse && !_reverse.contains(person.userId)) return false;
+      if (_mode == DiscoverMode.latestPhotos && (person.photoPath == null || person.photoPath!.isEmpty) && person.photo == null) {
+        return false;
+      }
+      if (ProfileDraft.hasPlus &&
+          _bodyFilter.isNotEmpty &&
+          (person.bodyType ?? '').toLowerCase() != _bodyFilter.toLowerCase()) {
+        return false;
+      }
+      if (ProfileDraft.hasPlus &&
+          _educationFilter.isNotEmpty &&
+          (person.education ?? '').toLowerCase() != _educationFilter.toLowerCase()) {
+        return false;
+      }
       if (person.age != null && (person.age! < ProfileDraft.ageFrom || person.age! > ProfileDraft.ageTo)) {
         return false;
       }
       return true;
     }).toList();
-    if (_mode == DiscoverMode.latestPhotos) {
+    if (_mode == DiscoverMode.popular) {
       list.sort((a, b) {
-        if (a.photoPath != null && b.photoPath == null) return -1;
-        if (a.photoPath == null && b.photoPath != null) return 1;
-        return 0;
+        final byLikes = b.likeCount.compareTo(a.likeCount);
+        if (byLikes != 0) return byLikes;
+        return _relevance(b).compareTo(_relevance(a));
       });
+    } else if (_mode == DiscoverMode.newest || _mode == DiscoverMode.latestPhotos) {
+      list.sort((a, b) {
+        final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bTime.compareTo(aTime);
+      });
+    } else {
+      list.sort((a, b) => _relevance(b).compareTo(_relevance(a)));
     }
     return list;
+  }
+
+  List<DiscoverPerson> get _pagePeople {
+    final all = _visible;
+    if (all.isEmpty) return const [];
+    final pageCount = (all.length / _pageSize).ceil();
+    final page = _page.clamp(0, pageCount - 1);
+    final start = page * _pageSize;
+    final end = (start + _pageSize).clamp(0, all.length);
+    return all.sublist(start, end);
   }
 
   Future<void> _openWeb() async {
@@ -440,6 +601,21 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
         'pref_city': ProfileDraft.city,
       }).eq('user_id', user.id);
     } catch (_) {}
+  }
+
+  Future<void> _favorite(DiscoverPerson person) async {
+    if (_favorites.contains(person.userId)) {
+      _say('Already in your private favorites.');
+      return;
+    }
+    final problem = await addFavorite(person.userId);
+    if (!mounted) return;
+    if (problem != null) {
+      _say(problem);
+      return;
+    }
+    setState(() => _favorites.add(person.userId));
+    _say('Saved to your private favorites.');
   }
 
   Future<void> _like(DiscoverPerson person) async {
@@ -643,12 +819,70 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
       ..likedYou = true;
   }
 
+  bool _modeLocked(DiscoverMode mode) =>
+      (mode == DiscoverMode.mutual || mode == DiscoverMode.reverse) && !_listsOpen;
+
+  Future<void> _pickBodyFilter() async {
+    if (!ProfileDraft.hasPlus) {
+      if (mounted) context.push('/app/upgrade');
+      return;
+    }
+    const options = ['Any', 'Slim', 'Average', 'Athletic', 'Curvy'];
+    final picked = await showPlacePicker(
+      context,
+      title: t('bodyStyle'),
+      options: options,
+      selected: _bodyFilter.isEmpty ? 'Any' : _bodyFilter,
+    );
+    if (picked == null) return;
+    setState(() {
+      _bodyFilter = picked == 'Any' ? '' : picked;
+      _page = 0;
+    });
+  }
+
+  Future<void> _pickEducationFilter() async {
+    if (!ProfileDraft.hasPlus) {
+      if (mounted) context.push('/app/upgrade');
+      return;
+    }
+    final options = ['Any', ...educationOptions.map((o) => o.label)];
+    String selected = 'Any';
+    for (final option in educationOptions) {
+      if (option.id == _educationFilter) selected = option.label;
+    }
+    final picked = await showPlacePicker(
+      context,
+      title: t('education'),
+      options: options,
+      selected: selected,
+    );
+    if (picked == null) return;
+    String next = '';
+    for (final option in educationOptions) {
+      if (option.label == picked) next = option.id;
+    }
+    setState(() {
+      _educationFilter = next;
+      _page = 0;
+    });
+  }
+
+  Future<void> _toggleLang() async {
+    await setAppLang(appLang.value == AppLang.sw ? AppLang.en : AppLang.sw);
+  }
+
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.paddingOf(context).top;
     final people = _visible;
+    final pagePeople = _pagePeople;
+    final pageCount = people.isEmpty ? 1 : (people.length / _pageSize).ceil();
+    final safePage = people.isEmpty ? 0 : _page.clamp(0, pageCount - 1);
     final videoPeople = _videoPeople;
     final videoMode = _surface == HomeSurface.video;
+    final lockedList = _modeLocked(_mode);
+    final name = JoinDraft.displayName.trim().isEmpty ? 'there' : JoinDraft.displayName.trim();
     return ColoredBox(
       color: _cream,
       child: ListView(
@@ -668,9 +902,120 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                     style: TextStyle(color: _ink, fontSize: 22, fontWeight: FontWeight.w700),
                   ),
                 ),
+                TextButton(
+                  onPressed: _toggleLang,
+                  style: TextButton.styleFrom(
+                    foregroundColor: _inkSoft,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    appLang.value == AppLang.sw ? t('english') : t('swahili'),
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(width: 4),
                 _RoundButton(icon: Icons.public, tooltip: 'Open the website', onPressed: _openWeb),
                 const SizedBox(width: 8),
                 _RoundButton(icon: Icons.tune, tooltip: 'Matching preferences', onPressed: _openPreferences),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Material(
+              color: _paper,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${t('hi')} $name',
+                            style: const TextStyle(color: _clay, fontSize: 22, fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '$_completionPercent% · ${ProfileDraft.matchCriteriaComplete ? t('matches') : t('nextStep')}',
+                            style: const TextStyle(color: _inkSoft, fontSize: 13),
+                          ),
+                          if (!ProfileDraft.matchCriteriaComplete)
+                            TextButton(
+                              onPressed: () => context.go('/app/profile'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: const Color(0xFF9C1B4E),
+                                padding: EdgeInsets.zero,
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: Text(t('completeProfile'), style: const TextStyle(fontWeight: FontWeight.w700, decoration: TextDecoration.underline)),
+                            ),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => context.push('/app/upgrade'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF9C1B4E),
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(t('upgrade'), style: const TextStyle(fontWeight: FontWeight.w700, decoration: TextDecoration.underline)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 34,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              children: [
+                for (final item in const [
+                  ('Mutual', '/app/upgrade'),
+                  ('Reverse', '/app/upgrade'),
+                  ('Filters', '/app/upgrade'),
+                  ('Plus', '/app/upgrade'),
+                  ('Meet', '/app/meet'),
+                  ('Chat', '/app/messages'),
+                ]) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ActionChip(
+                      label: Text(item.$1, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      onPressed: () => context.push(item.$2),
+                      backgroundColor: _paper,
+                      side: const BorderSide(color: _line),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(child: _StatChip(label: 'Messages', value: '${_counts.messages}', onTap: () => context.go('/app/messages'))),
+                const SizedBox(width: 8),
+                Expanded(child: _StatChip(label: 'Likes', value: '${_counts.likes}', onTap: () => context.go('/app/matches?tab=likes'))),
+                const SizedBox(width: 8),
+                Expanded(child: _StatChip(label: 'Views', value: '${_counts.views}', onTap: () => context.go('/app/matches?tab=views'))),
+                const SizedBox(width: 8),
+                Expanded(child: _StatChip(label: 'Favorites', value: '${_favorites.length}', onTap: () => context.go('/app/matches?tab=favorites'))),
               ],
             ),
           ),
@@ -682,8 +1027,8 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
               padding: const EdgeInsets.symmetric(horizontal: 16),
               children: [
                 _HomeFeatureTile(
-                  label: 'Video',
-                  subtitle: 'Tap to call',
+                  label: t('video'),
+                  subtitle: t('tapToCall'),
                   icon: Icons.videocam_rounded,
                   selected: videoMode,
                   accent: const Color(0xFF3F5E52),
@@ -691,8 +1036,8 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                 ),
                 const SizedBox(width: 10),
                 _HomeFeatureTile(
-                  label: 'Matches',
-                  subtitle: 'Browse',
+                  label: t('matches'),
+                  subtitle: t('browse'),
                   icon: Icons.favorite_rounded,
                   selected: !videoMode,
                   accent: _clay,
@@ -700,8 +1045,8 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                 ),
                 const SizedBox(width: 10),
                 _HomeFeatureTile(
-                  label: 'Online',
-                  subtitle: 'Active now',
+                  label: t('online'),
+                  subtitle: t('online'),
                   icon: Icons.circle,
                   selected: !videoMode && _mode == DiscoverMode.online,
                   accent: const Color(0xFF9C1B4E),
@@ -725,11 +1070,11 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Padding(
-                          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                           child: Text(
-                            'Video',
-                            style: TextStyle(color: _ink, fontSize: 20, fontWeight: FontWeight.w800),
+                            t('video'),
+                            style: const TextStyle(color: _ink, fontSize: 20, fontWeight: FontWeight.w800),
                           ),
                         ),
                         Padding(
@@ -791,49 +1136,17 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                             separatorBuilder: (context, index) => const SizedBox(width: 8),
                             itemBuilder: (context, index) {
                               final mode = _chipModes[index];
+                              final locked = _modeLocked(mode);
                               return _SortChip(
-                                label: _modeLabels[mode]!,
+                                label: _modeLabel(mode),
                                 selected: _mode == mode,
+                                locked: locked,
                                 onTap: () => setState(() {
                                   _mode = mode;
                                   _page = 0;
                                 }),
                               );
                             },
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                          child: Material(
-                            color: _paper,
-                            borderRadius: BorderRadius.circular(18),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(18),
-                              onTap: () => _openPreferences(focusAge: true),
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.cake_outlined, color: _clay),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          const Text('Age range', style: TextStyle(color: _inkSoft, fontSize: 13, fontWeight: FontWeight.w600)),
-                                          Text(
-                                            '${ProfileDraft.ageFrom} – ${ProfileDraft.ageTo} years',
-                                            style: const TextStyle(color: _ink, fontSize: 17, fontWeight: FontWeight.w700),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const Icon(Icons.tune, color: _clay),
-                                  ],
-                                ),
-                              ),
-                            ),
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -844,9 +1157,36 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                             padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Row(
                               children: [
-                                _FilterChip(label: ProfileDraft.language ?? 'Language', onTap: _openPreferences),
+                                if (ProfileDraft.hasPlus) ...[
+                                  _FilterChip(
+                                    label: _bodyFilter.isEmpty ? t('bodyStyle') : _bodyFilter,
+                                    onTap: _pickBodyFilter,
+                                    highlighted: _bodyFilter.isNotEmpty,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _FilterChip(
+                                    label: _educationFilter.isEmpty
+                                        ? t('education')
+                                        : educationOptions
+                                            .firstWhere(
+                                              (o) => o.id == _educationFilter,
+                                              orElse: () => educationOptions.first,
+                                            )
+                                            .label,
+                                    onTap: _pickEducationFilter,
+                                    highlighted: _educationFilter.isNotEmpty,
+                                  ),
+                                ] else ...[
+                                  _LockedFilterChip(label: t('bodyStyle'), onTap: () => context.push('/app/upgrade')),
+                                  const SizedBox(width: 8),
+                                  _LockedFilterChip(label: t('education'), onTap: () => context.push('/app/upgrade')),
+                                ],
                                 const SizedBox(width: 8),
-                                _FilterChip(label: ProfileDraft.howToMeet ?? 'Meet', onTap: _openPreferences),
+                                _FilterChip(
+                                  label: '${t('age')} ${ProfileDraft.ageFrom}–${ProfileDraft.ageTo}',
+                                  onTap: () => _openPreferences(focusAge: true),
+                                  highlighted: true,
+                                ),
                               ],
                             ),
                           ),
@@ -879,14 +1219,94 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                           ),
                           const SizedBox(height: 8),
                         ],
-                        for (var i = 0; i < people.length; i++)
-                          _ProfileRow(
-                            person: people[i],
-                            revealed: _mutual.contains(people[i].userId),
-                            onOpen: () => _openProfile(people[i]),
-                            onHi: () => _message(people[i]),
-                            onVideo: () => _videoCall(people[i]),
-                          ),
+                        if (lockedList)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: _paper,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: const Color(0xFFD4A574), style: BorderStyle.solid),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+                                child: Column(
+                                  children: [
+                                    Text(
+                                      t('lockedLists'),
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(color: _inkSoft, fontSize: 14, height: 1.4),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Wrap(
+                                      spacing: 10,
+                                      runSpacing: 10,
+                                      alignment: WrapAlignment.center,
+                                      children: [
+                                        FilledButton(
+                                          onPressed: () => context.go('/app/profile'),
+                                          style: FilledButton.styleFrom(backgroundColor: _clay),
+                                          child: Text(t('completeProfile')),
+                                        ),
+                                        OutlinedButton(
+                                          onPressed: () => context.push('/app/upgrade'),
+                                          style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF9C1B4E)),
+                                          child: Text(t('seeUpgrade')),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                        else if (!_loading && people.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                            child: Text(
+                              t('noMembers'),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: _inkSoft, fontSize: 15),
+                            ),
+                          )
+                        else ...[
+                          for (var i = 0; i < pagePeople.length; i++)
+                            _ProfileRow(
+                              person: pagePeople[i],
+                              revealed: _mutual.contains(pagePeople[i].userId),
+                              favorited: _favorites.contains(pagePeople[i].userId),
+                              onOpen: () => _openProfile(pagePeople[i]),
+                              onHi: () => _message(pagePeople[i]),
+                              onPass: () => _pass(pagePeople[i]),
+                              onFavorite: () => _favorite(pagePeople[i]),
+                              onVideo: () => _videoCall(pagePeople[i]),
+                            ),
+                          if (pageCount > 1)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  TextButton(
+                                    onPressed: safePage <= 0
+                                        ? null
+                                        : () => setState(() => _page = safePage - 1),
+                                    child: const Text('Prev'),
+                                  ),
+                                  Text(
+                                    'Page ${safePage + 1} / $pageCount',
+                                    style: const TextStyle(color: _inkSoft, fontWeight: FontWeight.w600),
+                                  ),
+                                  TextButton(
+                                    onPressed: safePage >= pageCount - 1
+                                        ? null
+                                        : () => setState(() => _page = safePage + 1),
+                                    child: const Text('Next'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
                       ],
                     ),
                   ),
@@ -1238,19 +1658,60 @@ class _VideoCallCard extends StatelessWidget {
   }
 }
 
+class _StatChip extends StatelessWidget {
+  const _StatChip({required this.label, required this.value, required this.onTap});
+
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _paper,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Column(
+            children: [
+              Text(value, style: const TextStyle(color: _ink, fontWeight: FontWeight.w800, fontSize: 16)),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _inkSoft, fontSize: 11, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ProfileRow extends StatelessWidget {
   const _ProfileRow({
     required this.person,
     required this.revealed,
     required this.onOpen,
     required this.onHi,
+    this.favorited = false,
+    this.onPass,
+    this.onFavorite,
     this.onVideo,
   });
 
   final DiscoverPerson person;
   final bool revealed;
+  final bool favorited;
   final VoidCallback onOpen;
   final VoidCallback onHi;
+  final VoidCallback? onPass;
+  final VoidCallback? onFavorite;
   final VoidCallback? onVideo;
 
   @override
@@ -1308,20 +1769,45 @@ class _ProfileRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      person.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: _ink, fontSize: 17, fontWeight: FontWeight.w700),
-                    ),
-                    if (person.age != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          '${person.age} years old',
-                          style: const TextStyle(color: _inkSoft, fontSize: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            person.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: _ink, fontSize: 17, fontWeight: FontWeight.w700),
+                          ),
                         ),
+                        if (person.photoCount > 0) ...[
+                          const SizedBox(width: 6),
+                          Icon(Icons.photo_camera_outlined, size: 14, color: _mute),
+                          const SizedBox(width: 2),
+                          Text('${person.photoCount}', style: const TextStyle(color: _mute, fontSize: 12, fontWeight: FontWeight.w600)),
+                        ],
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        [
+                          if (person.age != null) '${person.age}',
+                          if (person.city.isNotEmpty) person.city,
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: _inkSoft, fontSize: 14),
                       ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '${t('seeking')}: ${person.seeking}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: _inkSoft, fontSize: 13),
+                      ),
+                    ),
                     if (meta.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
@@ -1331,11 +1817,44 @@ class _ProfileRow extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: person.likedYou ? _clay : _mute,
-                            fontSize: 13,
+                            fontSize: 12,
                             fontWeight: person.likedYou ? FontWeight.w600 : FontWeight.w400,
                           ),
                         ),
                       ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Wrap(
+                        spacing: 10,
+                        children: [
+                          if (onPass != null)
+                            TextButton(
+                              onPressed: onPass,
+                              style: TextButton.styleFrom(
+                                foregroundColor: _mute,
+                                padding: EdgeInsets.zero,
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text('Pass', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                            ),
+                          if (onFavorite != null)
+                            TextButton(
+                              onPressed: onFavorite,
+                              style: TextButton.styleFrom(
+                                foregroundColor: favorited ? _clay : _mute,
+                                padding: EdgeInsets.zero,
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: Text(
+                                favorited ? 'Favorited' : 'Favorite',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1368,12 +1887,12 @@ class _ProfileRow extends StatelessWidget {
                             visualDensity: VisualDensity.compact,
                             shape: const StadiumBorder(),
                           ),
-                          child: const Row(
+                          child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.favorite, size: 16),
-                              SizedBox(width: 4),
-                              Text('Hi', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                              const Icon(Icons.favorite, size: 16),
+                              const SizedBox(width: 4),
+                              Text(t('hi'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                             ],
                           ),
                         ),
@@ -1600,6 +2119,15 @@ class _ProfileCard extends StatelessWidget {
                           style: const TextStyle(color: _inkSoft, fontSize: 16),
                         ),
                       ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '${t('seeking')}: ${person.seeking}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: _inkSoft, fontSize: 15),
+                      ),
+                    ),
                     if (lastSeenLabel(lastSeen: person.lastSeen, online: person.online) case final seen?)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
@@ -1671,16 +2199,22 @@ class _RoundButton extends StatelessWidget {
 }
 
 class _SortChip extends StatelessWidget {
-  const _SortChip({required this.label, required this.selected, required this.onTap});
+  const _SortChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.locked = false,
+  });
 
   final String label;
   final bool selected;
+  final bool locked;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? _paper : Colors.transparent,
+      color: selected ? _clay : _paper,
       borderRadius: BorderRadius.circular(22),
       elevation: selected ? 1 : 0,
       child: InkWell(
@@ -1690,14 +2224,51 @@ class _SortChip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           child: Row(
             children: [
+              if (locked) ...[
+                Icon(Icons.lock, size: 14, color: selected ? _paper : const Color(0xFF9C1B4E)),
+                const SizedBox(width: 4),
+              ],
               Text(
                 label,
-                style: TextStyle(color: selected ? _clay : _ink, fontWeight: FontWeight.w600, fontSize: 15),
+                style: TextStyle(
+                  color: selected ? _paper : _ink,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
               ),
-              if (selected) ...[
-                const SizedBox(width: 4),
-                const Icon(Icons.check, size: 16, color: _clay),
-              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LockedFilterChip extends StatelessWidget {
+  const _LockedFilterChip({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _paper,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: _line),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.lock, size: 14, color: Color(0xFF9C1B4E)),
+              const SizedBox(width: 6),
+              Text(label, style: const TextStyle(color: _inkSoft, fontWeight: FontWeight.w600)),
             ],
           ),
         ),
@@ -1931,7 +2502,7 @@ class _PreferencesSheetState extends State<_PreferencesSheet> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            _modeLabels[mode]!,
+                            _modeLabel(mode),
                             style: TextStyle(
                               fontSize: 17,
                               color: _mode == mode ? _clay : _ink,

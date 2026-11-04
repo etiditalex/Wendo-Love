@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:upendo_pamoja/backend.dart';
@@ -167,10 +168,13 @@ class _ViewsScreenState extends State<ViewsScreen> {
                     itemCount: people.length,
                     itemBuilder: (context, index) {
                       final person = people[index];
-                      return _ViewCard(
-                        photo: person.photo ?? cachedProfilePhoto(person.userId),
-                        name: person.name,
-                        revealed: _mutual.contains(person.userId),
+                      return GestureDetector(
+                        onTap: () => context.push('/app/people/${person.userId}'),
+                        child: _ViewCard(
+                          photo: person.photo ?? cachedProfilePhoto(person.userId),
+                          name: person.name,
+                          revealed: _mutual.contains(person.userId),
+                        ),
                       );
                     },
                   ),
@@ -180,7 +184,7 @@ class _ViewsScreenState extends State<ViewsScreen> {
             child: SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: () => setState(() => _mine = true),
+                onPressed: () => context.go('/app/matches?tab=likes'),
                 style: FilledButton.styleFrom(
                   backgroundColor: _clay,
                   foregroundColor: _paper,
@@ -188,7 +192,7 @@ class _ViewsScreenState extends State<ViewsScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: const StadiumBorder(),
                 ),
-                child: const Text('Match to see clearly', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                child: const Text('Open Activity', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               ),
             ),
           ),
@@ -299,108 +303,145 @@ class MatchesScreen extends StatefulWidget {
   State<MatchesScreen> createState() => _MatchesScreenState();
 }
 
-enum _LikeFilter { likedMe, myLikes, mutual }
+enum _ActivityTab { likes, views, favorites, mutual }
 
 class _MatchesScreenState extends State<MatchesScreen> {
-  List<ReceivedLike> _likedMe = [];
-  List<ReceivedLike> _myLikes = [];
-  Set<String> _mutual = {};
-  _LikeFilter _filter = _LikeFilter.likedMe;
+  List<ReceivedLike> _likes = [];
+  List<ProfileViewer> _views = [];
+  List<ReceivedLike> _favorites = [];
+  List<MatchThread> _mutual = [];
+  Set<String> _mutualIds = {};
+  _ActivityTab _tab = _ActivityTab.likes;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final tab = GoRouterState.of(context).uri.queryParameters['tab'];
+      if (tab == 'views') _tab = _ActivityTab.views;
+      if (tab == 'favorites') _tab = _ActivityTab.favorites;
+      if (tab == 'mutual') _tab = _ActivityTab.mutual;
+      if (tab == 'likes') _tab = _ActivityTab.likes;
+      if (mounted) setState(() {});
+    });
     _load();
   }
 
   Future<void> _load() async {
     try {
-      final likedMe = await loadReceivedLikes();
-      final myLikes = await loadSentLikes();
+      final likes = await loadReceivedLikes();
+      final views = await loadProfileViewers();
+      final favorites = await loadFavoritePeople();
       final threads = await loadMatchThreads();
       if (!mounted) return;
+      final mutual = [for (final thread in threads) if (thread.mutual) thread];
       setState(() {
-        _likedMe = likedMe;
-        _myLikes = myLikes;
-        _mutual = {
-          for (final thread in threads)
-            if (thread.mutual) thread.otherUserId,
-        };
+        _likes = likes;
+        _views = views;
+        _favorites = favorites;
+        _mutual = mutual;
+        _mutualIds = {for (final thread in mutual) thread.otherUserId};
       });
       await loadProfilePhotos([
-        ...likedMe.map((like) => like.userId),
-        ...myLikes.map((like) => like.userId),
+        ...likes.map((like) => like.userId),
+        ...views.map((viewer) => viewer.userId),
+        ...favorites.map((person) => person.userId),
+        ...mutual.map((thread) => thread.otherUserId),
       ]);
       if (!mounted) return;
-      for (final like in [...likedMe, ...myLikes]) {
+      for (final like in likes) {
         like.photo = cachedProfilePhoto(like.userId);
+      }
+      for (final viewer in views) {
+        viewer.photo = cachedProfilePhoto(viewer.userId);
+      }
+      for (final person in favorites) {
+        person.photo = cachedProfilePhoto(person.userId);
+      }
+      for (final thread in mutual) {
+        thread.photo = cachedProfilePhoto(thread.otherUserId);
       }
       setState(() {});
     } catch (_) {}
   }
 
-  List<ReceivedLike> get _people {
-    switch (_filter) {
-      case _LikeFilter.likedMe:
-        return _likedMe;
-      case _LikeFilter.myLikes:
-        return _myLikes;
-      case _LikeFilter.mutual:
-        final mine = {for (final like in _myLikes) like.userId};
-        final shown = <String, ReceivedLike>{};
-        for (final like in _likedMe) {
-          if (mine.contains(like.userId) || _mutual.contains(like.userId)) shown[like.userId] = like;
-        }
-        for (final like in _myLikes) {
-          if (_mutual.contains(like.userId)) shown[like.userId] = like;
-        }
-        return shown.values.toList();
-    }
+  void _selectTab(_ActivityTab tab) {
+    setState(() => _tab = tab);
+    final label = switch (tab) {
+      _ActivityTab.likes => 'likes',
+      _ActivityTab.views => 'views',
+      _ActivityTab.favorites => 'favorites',
+      _ActivityTab.mutual => 'mutual',
+    };
+    context.go('/app/matches?tab=$label');
   }
 
   String get _bannerTitle {
-    final count = _filter == _LikeFilter.likedMe
-        ? _likedMe.length
-        : _filter == _LikeFilter.myLikes
-            ? _myLikes.length
-            : _people.length;
-    if (_filter == _LikeFilter.likedMe) {
-      if (count == 0) return 'No one has liked your profile yet';
-      if (count == 1) return '1 person liked your profile';
-      return '$count people liked your profile';
+    switch (_tab) {
+      case _ActivityTab.likes:
+        if (_likes.isEmpty) return 'No incoming likes yet';
+        if (_likes.length == 1) return '1 person liked your profile';
+        return '${_likes.length} people liked your profile';
+      case _ActivityTab.views:
+        if (_views.isEmpty) return 'No profile views yet';
+        if (_views.length == 1) return '1 person viewed your profile';
+        return '${_views.length} people viewed your profile';
+      case _ActivityTab.favorites:
+        if (_favorites.isEmpty) return 'No favorites yet';
+        if (_favorites.length == 1) return '1 private favorite';
+        return '${_favorites.length} private favorites';
+      case _ActivityTab.mutual:
+        if (_mutual.isEmpty) return 'No mutual matches yet';
+        if (_mutual.length == 1) return '1 mutual match';
+        return '${_mutual.length} mutual matches';
     }
-    if (_filter == _LikeFilter.myLikes) {
-      if (count == 0) return 'You have not liked anyone yet';
-      if (count == 1) return 'You liked 1 profile';
-      return 'You liked $count profiles';
-    }
-    if (count == 0) return 'You have no mutual likes yet';
-    if (count == 1) return '1 mutual like';
-    return '$count mutual likes';
   }
 
-  Future<void> _openLike(ReceivedLike like) async {
-    try {
-      final matchId = await openConversation(like.userId);
-      if (!mounted || matchId == null) return;
-      Navigator.of(context, rootNavigator: true)
-          .push(MaterialPageRoute<void>(
+  Future<void> _likeBack(ReceivedLike like) async {
+    await sendLike(like.userId);
+    final matchId = await openConversation(like.userId);
+    if (!mounted) return;
+    if (matchId != null) {
+      await Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(
+          builder: (context) => ChatPage(
+            matchId: matchId,
+            title: like.name,
+            otherUserId: like.userId,
+            photo: like.photo ?? cachedProfilePhoto(like.userId),
+            mutual: true,
+          ),
+        ),
+      );
+    }
+    await _load();
+  }
+
+  void _openPerson(String userId) {
+    context.push('/app/people/$userId').then((_) => _load());
+  }
+
+  void _openThread(MatchThread thread) {
+    Navigator.of(context, rootNavigator: true)
+        .push(
+          MaterialPageRoute<void>(
             builder: (context) => ChatPage(
-              matchId: matchId,
-              title: like.name,
-              otherUserId: like.userId,
-              photo: like.photo ?? cachedProfilePhoto(like.userId),
-              mutual: _mutual.contains(like.userId),
+              matchId: thread.matchId,
+              title: thread.name,
+              otherUserId: thread.otherUserId,
+              photo: thread.photo ?? cachedProfilePhoto(thread.otherUserId),
+              lastSeen: thread.lastSeen,
+              online: thread.online,
+              mutual: thread.mutual,
             ),
-          ))
-          .then((_) => _load());
-    } catch (_) {}
+          ),
+        )
+        .then((_) => _load());
   }
 
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.paddingOf(context).top;
-    final people = _people;
     return ColoredBox(
       color: const Color(0xFFFFF7F4),
       child: Column(
@@ -416,17 +457,14 @@ class _MatchesScreenState extends State<MatchesScreen> {
                     SizedBox(width: 48),
                     Expanded(
                       child: Text(
-                        'Likes',
+                        'Activity',
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: _paper, fontSize: 20, fontWeight: FontWeight.w600),
                       ),
                     ),
-                    SizedBox(
-                      width: 48,
-                      child: Icon(Icons.more_horiz, color: _paper),
-                    ),
+                    SizedBox(width: 48, child: Icon(Icons.more_horiz, color: _paper)),
                   ],
                 ),
               ),
@@ -452,7 +490,7 @@ class _MatchesScreenState extends State<MatchesScreen> {
                         ),
                         const SizedBox(height: 2),
                         const Text(
-                          'Photos show on each profile.',
+                          'Likes, views, favorites, and mutual matches.',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: Color(0xFFFFE4EC), fontSize: 13, fontWeight: FontWeight.w500),
@@ -468,55 +506,233 @@ class _MatchesScreenState extends State<MatchesScreen> {
             color: const Color(0xFFFFF7F4),
             child: Row(
               children: [
-                _ViewsTab(label: 'Liked Me', selected: _filter == _LikeFilter.likedMe, onTap: () => setState(() => _filter = _LikeFilter.likedMe)),
-                _ViewsTab(label: 'My Likes', selected: _filter == _LikeFilter.myLikes, onTap: () => setState(() => _filter = _LikeFilter.myLikes)),
-                _ViewsTab(label: 'Mutual Likes', selected: _filter == _LikeFilter.mutual, onTap: () => setState(() => _filter = _LikeFilter.mutual)),
+                _ViewsTab(
+                  label: 'Liked you (${_likes.length})',
+                  selected: _tab == _ActivityTab.likes,
+                  onTap: () => _selectTab(_ActivityTab.likes),
+                ),
+                _ViewsTab(
+                  label: 'Views (${_views.length})',
+                  selected: _tab == _ActivityTab.views,
+                  onTap: () => _selectTab(_ActivityTab.views),
+                ),
+                _ViewsTab(
+                  label: 'Favorites (${_favorites.length})',
+                  selected: _tab == _ActivityTab.favorites,
+                  onTap: () => _selectTab(_ActivityTab.favorites),
+                ),
+                _ViewsTab(
+                  label: 'Mutual (${_mutual.length})',
+                  selected: _tab == _ActivityTab.mutual,
+                  onTap: () => _selectTab(_ActivityTab.mutual),
+                ),
               ],
             ),
           ),
-          Expanded(
-            child: people.isEmpty
-                ? const SizedBox.expand()
-                : GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: 0.78,
-                    ),
-                    itemCount: people.length,
-                    itemBuilder: (context, index) {
-                      final person = people[index];
-                      return GestureDetector(
-                        onTap: () => _openLike(person),
-                        child: _ViewCard(
-                          photo: person.photo ?? cachedProfilePhoto(person.userId),
-                          name: person.name,
-                          revealed: _mutual.contains(person.userId),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(40, 8, 40, 18),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () => setState(() => _filter = _LikeFilter.likedMe),
-                style: FilledButton.styleFrom(
-                  backgroundColor: _clay,
-                  foregroundColor: _paper,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: const StadiumBorder(),
-                ),
-                child: const Text('Match to see clearly', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              ),
-            ),
-          ),
+          Expanded(child: _buildBody()),
         ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    switch (_tab) {
+      case _ActivityTab.likes:
+        if (_likes.isEmpty) {
+          return const _ActivityEmpty(
+            title: 'No incoming likes yet',
+            body: 'When someone likes you in the app or on web, they show here.',
+          );
+        }
+        return GridView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 0.72,
+          ),
+          itemCount: _likes.length,
+          itemBuilder: (context, index) {
+            final like = _likes[index];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _openPerson(like.userId),
+                    child: _ViewCard(
+                      photo: like.photo ?? cachedProfilePhoto(like.userId),
+                      name: like.name,
+                      revealed: _mutualIds.contains(like.userId),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FilledButton(
+                  onPressed: () => _likeBack(like),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _clay,
+                    foregroundColor: _paper,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: const StadiumBorder(),
+                  ),
+                  child: const Text('Like back', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            );
+          },
+        );
+      case _ActivityTab.views:
+        if (_views.isEmpty) {
+          return const _ActivityEmpty(
+            title: 'No profile views yet',
+            body: 'Members who open your profile appear here.',
+          );
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          itemCount: _views.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final viewer = _views[index];
+            return _ActivityPersonTile(
+              name: viewer.name,
+              city: viewer.city,
+              photo: viewer.photo ?? cachedProfilePhoto(viewer.userId),
+              revealed: _mutualIds.contains(viewer.userId),
+              onTap: () => _openPerson(viewer.userId),
+            );
+          },
+        );
+      case _ActivityTab.favorites:
+        if (_favorites.isEmpty) {
+          return const _ActivityEmpty(
+            title: 'No favorites yet',
+            body: 'Star someone from Home or a profile to keep them here privately.',
+          );
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          itemCount: _favorites.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final person = _favorites[index];
+            return _ActivityPersonTile(
+              name: person.name,
+              city: person.city,
+              photo: person.photo ?? cachedProfilePhoto(person.userId),
+              revealed: true,
+              onTap: () => _openPerson(person.userId),
+            );
+          },
+        );
+      case _ActivityTab.mutual:
+        if (_mutual.isEmpty) {
+          return const _ActivityEmpty(
+            title: 'No mutual matches yet',
+            body: 'A mutual like in the app or on web opens a conversation here.',
+          );
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          itemCount: _mutual.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final thread = _mutual[index];
+            return _ActivityPersonTile(
+              name: thread.name,
+              city: thread.preview.isNotEmpty ? thread.preview : (thread.city.isEmpty ? 'Say hello' : thread.city),
+              photo: thread.photo ?? cachedProfilePhoto(thread.otherUserId),
+              revealed: true,
+              onTap: () => _openThread(thread),
+            );
+          },
+        );
+    }
+  }
+}
+
+class _ActivityEmpty extends StatelessWidget {
+  const _ActivityEmpty({required this.title, required this.body});
+
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 40, 28, 24),
+      child: Column(
+        children: [
+          Text(title, textAlign: TextAlign.center, style: const TextStyle(color: _ink, fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Text(body, textAlign: TextAlign.center, style: const TextStyle(color: _inkSoft, fontSize: 14, height: 1.4)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActivityPersonTile extends StatelessWidget {
+  const _ActivityPersonTile({
+    required this.name,
+    required this.city,
+    required this.photo,
+    required this.revealed,
+    required this.onTap,
+  });
+
+  final String name;
+  final String city;
+  final Uint8List? photo;
+  final bool revealed;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _paper,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(28),
+                child: SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: PrivacyPhoto(
+                    bytes: photo,
+                    revealed: revealed,
+                    showLock: false,
+                    placeholder: const ColoredBox(
+                      color: Color(0xFFEDE6DC),
+                      child: Icon(Icons.person, color: Color(0xFF6B645E)),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _ink, fontSize: 16, fontWeight: FontWeight.w700)),
+                    if (city.isNotEmpty)
+                      Text(city, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _inkSoft, fontSize: 13)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: _inkSoft),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -529,11 +745,11 @@ class MessagesScreen extends StatefulWidget {
   State<MessagesScreen> createState() => _MessagesScreenState();
 }
 
-enum _MessageFilter { received, sent, favorites, ended }
+enum _MessageFilter { all, received, sent, favorites, ended }
 
 class _MessagesScreenState extends State<MessagesScreen> {
   List<MatchThread> _threads = [];
-  _MessageFilter _filter = _MessageFilter.received;
+  _MessageFilter _filter = _MessageFilter.all;
   bool _editing = false;
 
   @override
@@ -566,6 +782,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   bool _keep(MatchThread thread, String? me) {
     switch (_filter) {
+      case _MessageFilter.all:
+        return !thread.unmatched;
       case _MessageFilter.received:
         return !thread.unmatched && thread.lastSenderId != null && thread.lastSenderId != me;
       case _MessageFilter.sent:
@@ -681,6 +899,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
             color: _paper,
             child: Row(
               children: [
+                _ViewsTab(label: 'All', selected: _filter == _MessageFilter.all, onTap: () => setState(() => _filter = _MessageFilter.all)),
                 _ViewsTab(label: 'Received', selected: _filter == _MessageFilter.received, onTap: () => setState(() => _filter = _MessageFilter.received)),
                 _ViewsTab(label: 'Sent', selected: _filter == _MessageFilter.sent, onTap: () => setState(() => _filter = _MessageFilter.sent)),
                 _ViewsTab(label: 'Favorites', selected: _filter == _MessageFilter.favorites, onTap: () => setState(() => _filter = _MessageFilter.favorites)),
@@ -689,20 +908,29 @@ class _MessagesScreenState extends State<MessagesScreen> {
             ),
           ),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.only(top: 4, bottom: 8),
-              itemCount: people.length,
-              itemBuilder: (context, index) {
-                final thread = people[index];
-                return _MessageRow(
-                  thread: thread,
-                  mine: thread.lastSenderId == me,
-                  editing: _editing,
-                  onTap: () => _open(thread),
-                  onEnd: () => _end(thread),
-                );
-              },
-            ),
+            child: people.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.fromLTRB(28, 40, 28, 24),
+                    child: Text(
+                      'No chats in this folder.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: _inkSoft, fontSize: 15),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.only(top: 4, bottom: 8),
+                    itemCount: people.length,
+                    itemBuilder: (context, index) {
+                      final thread = people[index];
+                      return _MessageRow(
+                        thread: thread,
+                        mine: thread.lastSenderId == me,
+                        editing: _editing,
+                        onTap: () => _open(thread),
+                        onEnd: () => _end(thread),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -1387,6 +1615,351 @@ class _ChatPageState extends State<ChatPage> {
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class MemberProfileScreen extends StatefulWidget {
+  const MemberProfileScreen({super.key, required this.userId});
+
+  final String userId;
+
+  @override
+  State<MemberProfileScreen> createState() => _MemberProfileScreenState();
+}
+
+class _MemberProfileScreenState extends State<MemberProfileScreen> {
+  MemberProfile? _profile;
+  bool _loading = true;
+  bool _liked = false;
+  bool _favorited = false;
+  bool _mutual = false;
+  int _photoIndex = 0;
+  String? _note;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _note = null;
+    });
+    await recordProfileView(widget.userId);
+    final profile = await loadMemberProfile(widget.userId);
+    final favorites = await loadFavoriteIds();
+    final threads = await loadMatchThreads();
+    final likedYou = await loadReceivedLikes();
+    final myLikes = await loadSentLikes();
+    if (!mounted) return;
+    setState(() {
+      _profile = profile;
+      _favorited = favorites.contains(widget.userId);
+      _mutual = threads.any((thread) => thread.otherUserId == widget.userId && thread.mutual);
+      _liked = myLikes.any((like) => like.userId == widget.userId) ||
+          likedYou.any((like) => like.userId == widget.userId && _mutual);
+      _loading = false;
+      _note = profile == null ? 'This member could not be loaded.' : null;
+      _photoIndex = 0;
+    });
+  }
+
+  Future<void> _like() async {
+    final problem = await sendLike(widget.userId);
+    if (!mounted) return;
+    if (problem != null) {
+      setState(() => _note = problem);
+      return;
+    }
+    setState(() {
+      _liked = true;
+      _note = 'Like sent.';
+    });
+  }
+
+  Future<void> _message() async {
+    final matchId = await openConversation(widget.userId);
+    if (!mounted) return;
+    if (matchId == null) {
+      setState(() => _note = 'Chat opens after you both like each other.');
+      return;
+    }
+    final profile = _profile;
+    await Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ChatPage(
+          matchId: matchId,
+          title: profile?.name ?? 'Member',
+          otherUserId: widget.userId,
+          photo: profile?.photos.isNotEmpty == true ? profile!.photos.first : cachedProfilePhoto(widget.userId),
+          lastSeen: profile?.lastSeen,
+          online: profile?.online ?? false,
+          mutual: _mutual,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _favorite() async {
+    if (_favorited) {
+      setState(() => _note = 'Already in your private favorites.');
+      return;
+    }
+    final problem = await addFavorite(widget.userId);
+    if (!mounted) return;
+    if (problem != null) {
+      setState(() => _note = problem);
+      return;
+    }
+    setState(() {
+      _favorited = true;
+      _note = 'Saved to your private favorites.';
+    });
+  }
+
+  Future<void> _pass() async {
+    final problem = await passPerson(widget.userId);
+    if (!mounted) return;
+    if (problem != null) {
+      setState(() => _note = problem);
+      return;
+    }
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/app');
+    }
+  }
+
+  Future<void> _block() async {
+    final problem = await blockMember(widget.userId);
+    if (!mounted) return;
+    if (problem != null) {
+      setState(() => _note = problem);
+      return;
+    }
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/app');
+    }
+  }
+
+  Future<void> _report() async {
+    final sent = await showReportPersonSheet(
+      context,
+      otherUserId: widget.userId,
+      otherName: _profile?.name,
+    );
+    if (!mounted || !sent) return;
+    setState(() => _note = 'Report sent for review.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final top = MediaQuery.paddingOf(context).top;
+    final profile = _profile;
+    final photos = profile?.photos ?? const <Uint8List>[];
+    final revealed = _mutual || !(profile?.blurUntilMutual ?? false);
+    return ColoredBox(
+      color: _cream,
+      child: Column(
+        children: [
+          ColoredBox(
+            color: _clayDeep,
+            child: SizedBox(
+              height: top + 56,
+              child: Padding(
+                padding: EdgeInsets.only(top: top),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: () {
+                        if (context.canPop()) {
+                          context.pop();
+                        } else {
+                          context.go('/app');
+                        }
+                      },
+                      icon: const Icon(Icons.arrow_back, color: _paper),
+                    ),
+                    const Expanded(
+                      child: Text(
+                        'Member profile',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: _paper, fontSize: 18, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => context.push('/app/upgrade'),
+                      child: const Text('Upgrade', style: TextStyle(color: _paper, fontWeight: FontWeight.w700)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_note != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Text(_note!, style: const TextStyle(color: _inkSoft, fontSize: 13)),
+            ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: _clay))
+                : profile == null
+                    ? const Center(child: Text('Profile unavailable', style: TextStyle(color: _inkSoft)))
+                    : ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(20),
+                            child: AspectRatio(
+                              aspectRatio: 0.92,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  PrivacyPhoto(
+                                    bytes: photos.isEmpty ? null : photos[_photoIndex.clamp(0, photos.length - 1)],
+                                    revealed: revealed,
+                                    placeholder: const ColoredBox(
+                                      color: Color(0xFFE7DCCB),
+                                      child: Icon(Icons.person, size: 96, color: _inkSoft),
+                                    ),
+                                  ),
+                                  if (photos.length > 1) ...[
+                                    Positioned(
+                                      left: 4,
+                                      top: 0,
+                                      bottom: 0,
+                                      child: IconButton(
+                                        onPressed: () => setState(() {
+                                          _photoIndex = (_photoIndex - 1 + photos.length) % photos.length;
+                                        }),
+                                        icon: const Icon(Icons.chevron_left, color: _paper),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      right: 4,
+                                      top: 0,
+                                      bottom: 0,
+                                      child: IconButton(
+                                        onPressed: () => setState(() {
+                                          _photoIndex = (_photoIndex + 1) % photos.length;
+                                        }),
+                                        icon: const Icon(Icons.chevron_right, color: _paper),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      left: 0,
+                                      right: 0,
+                                      bottom: 12,
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          for (var i = 0; i < photos.length; i++)
+                                            Container(
+                                              width: 8,
+                                              height: 8,
+                                              margin: const EdgeInsets.symmetric(horizontal: 3),
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: i == _photoIndex ? _paper : const Color(0x66FFFDF8),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            profile.age == null ? profile.name : '${profile.name}, ${profile.age}',
+                            style: const TextStyle(color: _ink, fontSize: 28, fontWeight: FontWeight.w700),
+                          ),
+                          if (profile.city.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(profile.city, style: const TextStyle(color: _inkSoft, fontSize: 16)),
+                            ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              lastSeenLabel(lastSeen: profile.lastSeen, online: profile.online) ?? 'Last seen private',
+                              style: TextStyle(
+                                color: profile.online ? _sage : _inkSoft,
+                                fontSize: 14,
+                                fontWeight: profile.online ? FontWeight.w700 : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Text('Seeking: ${profile.seeking}', style: const TextStyle(color: _inkSoft, fontSize: 15)),
+                          ),
+                          if (profile.bio != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Text(profile.bio!, style: const TextStyle(color: _ink, fontSize: 15, height: 1.45)),
+                            ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Text(
+                              [
+                                if (profile.bodyType != null && profile.bodyType!.isNotEmpty) profile.bodyType!,
+                                if (profile.education != null && profile.education!.isNotEmpty) profile.education!,
+                                if (photos.isNotEmpty) '${photos.length} photos',
+                                if (profile.photoVerified) 'Photo confirmed',
+                              ].join(' · '),
+                              style: const TextStyle(color: _inkSoft, fontSize: 13),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              FilledButton(
+                                onPressed: _liked ? null : _like,
+                                style: FilledButton.styleFrom(backgroundColor: _liked ? _clayDeep : _clay, foregroundColor: _paper),
+                                child: Text(_liked ? 'Liked' : 'Like'),
+                              ),
+                              OutlinedButton(
+                                onPressed: _message,
+                                style: OutlinedButton.styleFrom(foregroundColor: _clayDeep),
+                                child: const Text('Message'),
+                              ),
+                              OutlinedButton(
+                                onPressed: _favorite,
+                                style: OutlinedButton.styleFrom(foregroundColor: _favorited ? _clay : _ink),
+                                child: Text(_favorited ? 'Favorited' : 'Favorite'),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Wrap(
+                            spacing: 16,
+                            children: [
+                              TextButton(onPressed: _pass, child: const Text('Pass')),
+                              TextButton(onPressed: _block, child: const Text('Block')),
+                              TextButton(
+                                onPressed: _report,
+                                style: TextButton.styleFrom(foregroundColor: _clayDeep),
+                                child: const Text('Report'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
           ),
         ],
       ),

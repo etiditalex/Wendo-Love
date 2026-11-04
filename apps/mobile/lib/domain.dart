@@ -6,6 +6,19 @@ class RelationshipIntent {
   final String label;
 }
 
+const genders = [
+  RelationshipIntent('woman', 'Women'),
+  RelationshipIntent('man', 'Men'),
+  RelationshipIntent('nonbinary', 'Nonbinary people'),
+];
+
+const educationOptions = [
+  RelationshipIntent('secondary', 'Secondary'),
+  RelationshipIntent('diploma', 'Diploma'),
+  RelationshipIntent('degree', 'Degree'),
+  RelationshipIntent('postgraduate', 'Postgraduate'),
+];
+
 const relationshipIntents = [
   RelationshipIntent('marriage', 'Marriage'),
   RelationshipIntent('long_term', 'Long-term partnership'),
@@ -13,6 +26,35 @@ const relationshipIntents = [
   RelationshipIntent('friendship', 'Friendship'),
   RelationshipIntent('unsure', 'Still deciding'),
 ];
+
+String genderLabel(String? id) {
+  if (id == null || id.isEmpty) return '';
+  for (final option in genders) {
+    if (option.id == id) return option.label;
+  }
+  return id;
+}
+
+String seekingLine({
+  required List<String> seekingGenders,
+  required int ageFrom,
+  required int ageTo,
+  required String intent,
+}) {
+  final people = [
+    for (final id in seekingGenders)
+      if (genderLabel(id).isNotEmpty) genderLabel(id),
+  ];
+  final ages = '$ageFrom–$ageTo';
+  if (people.isNotEmpty) return '${people.join(', ')}, $ages';
+  final intentLabel = () {
+    for (final option in relationshipIntents) {
+      if (option.id == intent) return option.label;
+    }
+    return intent.isEmpty ? 'Open to connection' : intent;
+  }();
+  return '$intentLabel, $ages';
+}
 
 const hivStatusOptions = [
   RelationshipIntent('living_with_hiv', 'Living with HIV'),
@@ -67,6 +109,10 @@ class ProfileDraft {
   static String? heightLabel;
   static String? weightLabel;
   static String? bodyType;
+  static String? gender;
+  static List<String> seekingGenders = [];
+  static String? education;
+  static DateTime? premiumUntil;
   static String? ethnicity;
   static String? childrenCount;
   static String? oldestChild;
@@ -84,6 +130,17 @@ class ProfileDraft {
   static bool get photoVerified => photoVerifiedAt != null;
   static bool get photoVerifyPending =>
       photoVerifyRequestedAt != null && photoVerifiedAt == null;
+
+  static bool get hasPlus {
+    final until = premiumUntil;
+    return until != null && until.isAfter(DateTime.now().toUtc());
+  }
+
+  static bool get matchCriteriaComplete =>
+      city.trim().isNotEmpty &&
+      (gender?.isNotEmpty ?? false) &&
+      seekingGenders.isNotEmpty &&
+      photo != null;
 }
 
 /// Online while the member's app is open. Otherwise a line such as "39 minutes ago".

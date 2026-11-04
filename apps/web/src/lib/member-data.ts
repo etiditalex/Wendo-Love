@@ -635,6 +635,70 @@ export async function recordProfileView(client: SupabaseClient, otherUserId: str
   }
 }
 
+export type MemberProfile = DiscoveryCard & {
+  bio: string | null;
+  photoUrls: string[];
+  blurUntilMutual: boolean;
+};
+
+/** Peer profile for the Matches Home → detail view (gallery + seeking). */
+export async function loadMemberProfile(
+  client: SupabaseClient,
+  viewerId: string,
+  otherUserId: string,
+): Promise<MemberProfile | null> {
+  if (!otherUserId || otherUserId === viewerId) return null;
+  const rich =
+    "user_id, display_name, city, bio, relationship_intent, relationship_intents, age_preference_min, age_preference_max, gender, seeking_genders, body_type, education, is_online, last_seen_at, created_at, photo_verified_at, blur_until_mutual";
+  const basic =
+    "user_id, display_name, city, bio, relationship_intent, age_preference_min, age_preference_max, is_online, last_seen_at, created_at";
+  let row: Record<string, unknown> | null = null;
+  const first = await client.from("profiles").select(rich).eq("user_id", otherUserId).maybeSingle();
+  if (first.error) {
+    const fallback = await client.from("profiles").select(basic).eq("user_id", otherUserId).maybeSingle();
+    row = (fallback.data as Record<string, unknown> | null) ?? null;
+  } else {
+    row = (first.data as Record<string, unknown> | null) ?? null;
+  }
+  if (!row) return null;
+
+  const { data: photos } = await client
+    .from("profile_photos")
+    .select("storage_path, sort_order")
+    .eq("user_id", otherUserId)
+    .order("sort_order", { ascending: true });
+  const paths = ((photos as Array<{ storage_path?: string }> | null) ?? [])
+    .map((item) => item.storage_path)
+    .filter((path): path is string => typeof path === "string" && path.length > 0);
+  const photoUrls = (
+    await Promise.all(paths.map(async (path) => signedPhoto(client, path)))
+  ).filter((url): url is string => Boolean(url));
+
+  const seeking = Array.isArray(row.seeking_genders) ? row.seeking_genders.map(String) : [];
+  return {
+    user_id: otherUserId,
+    display_name: String(row.display_name || "Member"),
+    city: (row.city as string | null) ?? null,
+    bio: (row.bio as string | null) ?? null,
+    relationship_intent: String(row.relationship_intent ?? "unsure"),
+    relationship_intents: Array.isArray(row.relationship_intents) ? row.relationship_intents.map(String) : [],
+    age_preference_min: (row.age_preference_min as number | null) ?? null,
+    age_preference_max: (row.age_preference_max as number | null) ?? null,
+    gender: (row.gender as string | null) ?? null,
+    seeking_genders: seeking,
+    body_type: (row.body_type as string | null) ?? null,
+    education: (row.education as string | null) ?? null,
+    is_online: Boolean(row.is_online),
+    last_seen_at: (row.last_seen_at as string | null) ?? null,
+    photo_verified_at: (row.photo_verified_at as string | null) ?? null,
+    created_at: (row.created_at as string | null) ?? null,
+    photo_count: photoUrls.length,
+    photoUrl: photoUrls[0] ?? null,
+    photoUrls,
+    blurUntilMutual: Boolean(row.blur_until_mutual),
+  };
+}
+
 export async function exportOwnAccount(client: SupabaseClient): Promise<Record<string, unknown> | null> {
   const { data, error } = await client.rpc("export_own_account");
   if (error || !data || typeof data !== "object") return null;

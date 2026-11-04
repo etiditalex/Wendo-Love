@@ -659,26 +659,42 @@ export function SettingsPanel() {
   );
 }
 
+type ActivityTab = "likes" | "views" | "favorites" | "mutual";
+
 export function MatchesPanel() {
   const session = useMemberSession();
+  const [tab, setTab] = useState<ActivityTab>("likes");
   const [likes, setLikes] = useState<ReceivedLike[]>([]);
+  const [views, setViews] = useState<ReceivedLike[]>([]);
+  const [favorites, setFavorites] = useState<ReceivedLike[]>([]);
   const [threads, setThreads] = useState<MatchThread[]>([]);
   const [note, setNote] = useState("Loading…");
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const next = new URLSearchParams(window.location.search).get("tab");
+    if (next === "likes" || next === "views" || next === "favorites" || next === "mutual") setTab(next);
+  }, []);
+
+  useEffect(() => {
     if (!session.userId) {
-      if (session.ready) setNote("Log in to see likes and matches from the app.");
+      if (session.ready) setNote("Log in to see likes, views, favorites, and mutual matches.");
       return;
     }
     const supabase = createClient();
     if (!supabase) return;
-    Promise.all([loadReceivedLikes(supabase, session.userId), loadMatchThreads(supabase, session.userId)]).then(
-      ([incoming, matchThreads]) => {
-        setLikes(incoming);
-        setThreads(matchThreads.filter((thread) => thread.mutual));
-        setNote("");
-      },
-    );
+    Promise.all([
+      loadReceivedLikes(supabase, session.userId),
+      loadProfileViewers(supabase, session.userId),
+      loadFavoritePeople(supabase, session.userId),
+      loadMatchThreads(supabase, session.userId),
+    ]).then(([incoming, viewers, saved, matchThreads]) => {
+      setLikes(incoming);
+      setViews(viewers);
+      setFavorites(saved);
+      setThreads(matchThreads.filter((thread) => thread.mutual));
+      setNote("");
+    });
   }, [session.ready, session.userId]);
 
   async function onLikeBack(userId: string) {
@@ -690,75 +706,172 @@ export function MatchesPanel() {
     if (matchId) window.location.href = `/app/messages?match=${matchId}`;
   }
 
+  function selectTab(next: ActivityTab) {
+    setTab(next);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", next);
+      window.history.replaceState({}, "", url.toString());
+    }
+  }
+
+  const tabs: { id: ActivityTab; label: string; count: number }[] = [
+    { id: "likes", label: "Liked you", count: likes.length },
+    { id: "views", label: "Views", count: views.length },
+    { id: "favorites", label: "Favorites", count: favorites.length },
+    { id: "mutual", label: "Mutual", count: threads.length },
+  ];
+
   return (
     <div className="grid gap-6">
       <SignedOutNote />
       {note ? <p className="text-sm text-ink-soft">{note}</p> : null}
-      <section className="grid gap-3">
-        <h2 className="text-xl font-semibold text-clay-deep">Liked you</h2>
-        {likes.length === 0 ? (
-          <Empty title="No incoming likes yet" body="When someone likes you in the app or on web, they show here." />
-        ) : (
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {likes.map((like) => (
-              <li key={like.userId} className="overflow-hidden rounded-2xl bg-paper ring-1 ring-line">
-                {like.photoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={like.photoUrl} alt="" className="h-40 w-full object-cover" />
-                ) : (
-                  <div className="grid h-40 place-items-center bg-cream text-ink-soft">No photo</div>
-                )}
-                <div className="p-4">
-                  <h3 className="font-semibold">{like.name}</h3>
-                  <p className="text-sm text-ink-soft">{like.city || "Location kept broad"}</p>
-                  <button
-                    type="button"
-                    onClick={() => onLikeBack(like.userId)}
-                    className="mt-3 rounded-full bg-clay px-4 py-2 text-sm font-semibold text-paper"
-                  >
-                    Like back
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      <section className="grid gap-3">
-        <h2 className="text-xl font-semibold text-clay-deep">Mutual matches</h2>
-        {threads.length === 0 ? (
-          <Empty title="No mutual matches yet" body="A mutual like in the app or on web opens a conversation here." />
-        ) : (
-          <ul className="grid gap-3">
-            {threads.map((thread) => (
-              <li key={thread.matchId}>
-                <Link
-                  href={`/app/messages?match=${thread.matchId}`}
-                  className="flex items-center gap-3 rounded-2xl bg-paper p-4 ring-1 ring-line hover:bg-cream"
-                >
-                  <div className="h-14 w-14 overflow-hidden rounded-full bg-cream">
-                    {thread.photoUrl ? (
+      <div className="flex flex-wrap gap-2">
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => selectTab(item.id)}
+            className={`rounded-full px-3.5 py-1.5 text-sm font-semibold ${
+              tab === item.id ? "bg-clay text-paper" : "bg-paper text-ink ring-1 ring-line"
+            }`}
+          >
+            {item.label} ({item.count})
+          </button>
+        ))}
+      </div>
+
+      {tab === "likes" ? (
+        <section className="grid gap-3">
+          {likes.length === 0 ? (
+            <Empty title="No incoming likes yet" body="When someone likes you in the app or on web, they show here." />
+          ) : (
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {likes.map((like) => (
+                <li key={like.userId} className="overflow-hidden rounded-2xl bg-paper ring-1 ring-line">
+                  <Link href={`/app/people/${like.userId}`}>
+                    {like.photoUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={thread.photoUrl} alt="" className="h-full w-full object-cover" />
-                    ) : null}
+                      <img src={like.photoUrl} alt="" className="h-40 w-full object-cover" />
+                    ) : (
+                      <div className="grid h-40 place-items-center bg-cream text-ink-soft">No photo</div>
+                    )}
+                  </Link>
+                  <div className="p-4">
+                    <Link href={`/app/people/${like.userId}`} className="font-semibold hover:underline">
+                      {like.name}
+                    </Link>
+                    <p className="text-sm text-ink-soft">{like.city || "Location kept broad"}</p>
+                    <button
+                      type="button"
+                      onClick={() => onLikeBack(like.userId)}
+                      className="mt-3 rounded-full bg-clay px-4 py-2 text-sm font-semibold text-paper"
+                    >
+                      Like back
+                    </button>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold">{thread.name}</p>
-                    <p className="truncate text-sm text-ink-soft">{thread.preview || "Say hello"}</p>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      {tab === "views" ? (
+        <section className="grid gap-3">
+          {views.length === 0 ? (
+            <Empty title="No profile views yet" body="Members who open your profile appear here." />
+          ) : (
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {views.map((viewer) => (
+                <li key={viewer.userId}>
+                  <Link
+                    href={`/app/people/${viewer.userId}`}
+                    className="flex items-center gap-3 rounded-2xl bg-paper p-4 ring-1 ring-line hover:bg-cream"
+                  >
+                    <div className="grid h-12 w-12 place-items-center rounded-full bg-cream text-ink-soft">👁</div>
+                    <div className="min-w-0">
+                      <p className="font-semibold">{viewer.name}</p>
+                      <p className="truncate text-sm text-ink-soft">{viewer.city || "Location kept broad"}</p>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      {tab === "favorites" ? (
+        <section className="grid gap-3">
+          {favorites.length === 0 ? (
+            <Empty title="No favorites yet" body="Star someone from Home or a profile to keep them here privately." />
+          ) : (
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {favorites.map((person) => (
+                <li key={person.userId}>
+                  <Link
+                    href={`/app/people/${person.userId}`}
+                    className="flex items-center gap-3 rounded-2xl bg-paper p-4 ring-1 ring-line hover:bg-cream"
+                  >
+                    <div className="h-12 w-12 overflow-hidden rounded-full bg-cream">
+                      {person.photoUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={person.photoUrl} alt="" className="h-full w-full object-cover" />
+                      ) : null}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold">{person.name}</p>
+                      <p className="truncate text-sm text-ink-soft">{person.city || "Location kept broad"}</p>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      {tab === "mutual" ? (
+        <section className="grid gap-3">
+          {threads.length === 0 ? (
+            <Empty title="No mutual matches yet" body="A mutual like in the app or on web opens a conversation here." />
+          ) : (
+            <ul className="grid gap-3">
+              {threads.map((thread) => (
+                <li key={thread.matchId}>
+                  <Link
+                    href={`/app/messages?match=${thread.matchId}`}
+                    className="flex items-center gap-3 rounded-2xl bg-paper p-4 ring-1 ring-line hover:bg-cream"
+                  >
+                    <div className="h-14 w-14 overflow-hidden rounded-full bg-cream">
+                      {thread.photoUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={thread.photoUrl} alt="" className="h-full w-full object-cover" />
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">{thread.name}</p>
+                      <p className="truncate text-sm text-ink-soft">{thread.preview || "Say hello"}</p>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }
 
+type MessageFolder = "received" | "sent" | "favorites" | "all";
+
 export function MessagesPanel() {
   const session = useMemberSession();
   const [threads, setThreads] = useState<MatchThread[]>([]);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [folder, setFolder] = useState<MessageFolder>("all");
   const [activeMatch, setActiveMatch] = useState<string | null>(null);
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [draft, setDraft] = useState("");
@@ -777,12 +890,22 @@ export function MessagesPanel() {
     }
     const supabase = createClient();
     if (!supabase) return;
-    loadMatchThreads(supabase, session.userId).then((list) => {
-      setThreads(list);
-      setNote(list.length === 0 ? "No conversations yet." : "");
-      if (!activeMatch && list[0]) setActiveMatch(list[0].matchId);
-    });
+    Promise.all([loadMatchThreads(supabase, session.userId), loadFavoritePeople(supabase, session.userId)]).then(
+      ([list, saved]) => {
+        setThreads(list);
+        setFavoriteIds(new Set(saved.map((person) => person.userId)));
+        setNote(list.length === 0 ? "No conversations yet." : "");
+        if (!activeMatch && list[0]) setActiveMatch(list[0].matchId);
+      },
+    );
   }, [session.ready, session.userId, activeMatch]);
+
+  const visibleThreads = threads.filter((thread) => {
+    if (folder === "favorites") return favoriteIds.has(thread.otherUserId);
+    if (folder === "received") return Boolean(thread.lastSenderId && thread.lastSenderId !== session.userId);
+    if (folder === "sent") return Boolean(thread.lastSenderId && thread.lastSenderId === session.userId);
+    return true;
+  });
 
   useEffect(() => {
     if (!activeMatch) return;
@@ -847,16 +970,36 @@ export function MessagesPanel() {
   }
 
   const active = threads.find((thread) => thread.matchId === activeMatch) ?? null;
+  const folders: { id: MessageFolder; label: string }[] = [
+    { id: "all", label: "All" },
+    { id: "received", label: "Received" },
+    { id: "sent", label: "Sent" },
+    { id: "favorites", label: "Favorites" },
+  ];
 
   return (
     <div className="grid gap-4">
       <SignedOutNote />
+      <div className="flex flex-wrap gap-2">
+        {folders.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setFolder(item.id)}
+            className={`rounded-full px-3.5 py-1.5 text-sm font-semibold ${
+              folder === item.id ? "bg-clay text-paper" : "bg-paper text-ink ring-1 ring-line"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
       <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
       <aside className="rounded-2xl bg-paper ring-1 ring-line">
         <div className="border-b border-line px-4 py-3 font-semibold">Chats</div>
         {note ? <p className="px-4 py-3 text-sm text-ink-soft">{note}</p> : null}
         <ul className="divide-y divide-line">
-          {threads.map((thread) => (
+          {visibleThreads.map((thread) => (
             <li key={thread.matchId}>
               <button
                 type="button"
@@ -884,6 +1027,9 @@ export function MessagesPanel() {
             </li>
           ))}
         </ul>
+        {visibleThreads.length === 0 && !note ? (
+          <p className="px-4 py-3 text-sm text-ink-soft">No chats in this folder.</p>
+        ) : null}
       </aside>
 
       <section className="flex min-h-[420px] flex-col rounded-2xl bg-paper ring-1 ring-line">

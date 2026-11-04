@@ -109,6 +109,81 @@ class _EditProfilePageState extends State<EditProfilePage> {
     await _commit();
   }
 
+  String _genderSelfLabel(String? id) {
+    return switch (id) {
+      'woman' => 'A woman',
+      'man' => 'A man',
+      'nonbinary' => 'Nonbinary',
+      _ => '',
+    };
+  }
+
+  String _educationLabel(String? id) {
+    if (id == null || id.isEmpty) return '';
+    for (final option in educationOptions) {
+      if (option.id == id) return option.label;
+    }
+    return id;
+  }
+
+  String get _seekingLabel {
+    if (ProfileDraft.seekingGenders.isEmpty) return '';
+    return [
+      for (final id in ProfileDraft.seekingGenders)
+        if (genderLabel(id).isNotEmpty) genderLabel(id),
+    ].join(', ');
+  }
+
+  Future<void> _editSeeking() async {
+    final selected = {...ProfileDraft.seekingGenders};
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: _paper,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheet) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('I hope to meet', style: TextStyle(color: _ink, fontSize: 18, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 12),
+                  for (final option in genders)
+                    CheckboxListTile(
+                      value: selected.contains(option.id),
+                      title: Text(option.label),
+                      activeColor: _clayDeep,
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (on) {
+                        setSheet(() {
+                          if (on == true) {
+                            selected.add(option.id);
+                          } else {
+                            selected.remove(option.id);
+                          }
+                        });
+                      },
+                    ),
+                  const SizedBox(height: 8),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Save'),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (saved != true) return;
+    ProfileDraft.seekingGenders = selected.toList();
+    await _commit();
+  }
+
   Future<void> _editPlace() async {
     var country = ProfileDraft.country;
     var region = ProfileDraft.region;
@@ -313,6 +388,48 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
                 _EditRow(label: 'Lives in:', value: _livesIn, onTap: _editPlace),
+                const _EditSection('Match criteria'),
+                _EditRow(
+                  label: 'I am:',
+                  value: _genderSelfLabel(ProfileDraft.gender),
+                  onTap: () => _editChoice(
+                    title: 'I am',
+                    value: _genderSelfLabel(ProfileDraft.gender),
+                    options: const ['A woman', 'A man', 'Nonbinary', 'Prefer not to say yet'],
+                    onSave: (value) {
+                      ProfileDraft.gender = switch (value) {
+                        'A woman' => 'woman',
+                        'A man' => 'man',
+                        'Nonbinary' => 'nonbinary',
+                        _ => null,
+                      };
+                    },
+                  ),
+                ),
+                _EditRow(
+                  label: 'I hope to meet:',
+                  value: _seekingLabel,
+                  onTap: _editSeeking,
+                ),
+                _EditRow(
+                  label: 'Education:',
+                  value: _educationLabel(ProfileDraft.education),
+                  onTap: () => _editChoice(
+                    title: 'Education',
+                    value: _educationLabel(ProfileDraft.education),
+                    options: [
+                      'Prefer not to say',
+                      ...educationOptions.map((o) => o.label),
+                    ],
+                    onSave: (value) {
+                      String? next;
+                      for (final option in educationOptions) {
+                        if (option.label == value) next = option.id;
+                      }
+                      ProfileDraft.education = next;
+                    },
+                  ),
+                ),
                 const _EditSection('Appearance'),
                 _EditRow(
                   label: 'Hair color:',

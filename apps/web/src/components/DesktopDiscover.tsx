@@ -184,16 +184,40 @@ export function DesktopDiscover() {
               <p className="text-sm text-ink-soft">
                 {board.completion}% · {board.criteriaComplete ? t("matches") : t("nextStep")}
               </p>
+              {!board.criteriaComplete ? (
+                <Link href="/app/profile" className="mt-1 inline-block text-sm font-semibold text-clay-deep underline">
+                  {t("completeProfile")}
+                </Link>
+              ) : null}
             </div>
             <Link href="/app/upgrade" className="text-sm font-semibold text-clay-deep underline">
               {t("learnMembership")}
             </Link>
           </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[
+              { href: "/app/upgrade", label: "Mutual" },
+              { href: "/app/upgrade", label: "Reverse" },
+              { href: "/app/upgrade", label: "Filters" },
+              { href: "/app/upgrade", label: "Plus" },
+              { href: "/app/meet", label: "Meet" },
+              { href: "/app/messages", label: "Chat" },
+            ].map((item) => (
+              <Link
+                key={item.label}
+                href={item.href}
+                className="rounded-full bg-cream px-3 py-1 text-xs font-semibold text-ink-soft ring-1 ring-line"
+                title={t("learnMembership")}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
           <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
             <Count label={t("messages")} value={board.messages} href="/app/messages" />
-            <Count label={t("interests")} value={board.interests} href="/app/matches" />
-            <Count label={t("views")} value={board.views} href="/app/settings" />
-            <Count label={t("favorites")} value={board.favorites} href="/app/settings" />
+            <Count label={t("interests")} value={board.interests} href="/app/matches?tab=likes" />
+            <Count label={t("views")} value={board.views} href="/app/matches?tab=views" />
+            <Count label={t("favorites")} value={board.favorites} href="/app/matches?tab=favorites" />
           </dl>
         </div>
       ) : null}
@@ -305,6 +329,9 @@ export function DesktopDiscover() {
           {visible.map((card) => (
             <li key={card.user_id} className="overflow-hidden rounded-md bg-paper shadow-[0_1px_3px_rgba(0,0,0,0.12)] ring-1 ring-black/5">
               <div className="relative aspect-[3/4] bg-[#e7dccb]">
+                <Link href={`/app/people/${card.user_id}`} className="absolute inset-0 z-0" aria-label={`Open ${card.display_name}`}>
+                  <span className="sr-only">Open profile</span>
+                </Link>
                 {card.photoUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={card.photoUrl} alt="" className="h-full w-full object-cover" />
@@ -312,10 +339,10 @@ export function DesktopDiscover() {
                   <div className="grid h-full place-items-center text-ink-soft">No photo</div>
                 )}
                 {isNewMember(card.created_at) ? (
-                  <span className="absolute top-0 left-0 bg-sage px-2 py-1 text-[10px] font-bold tracking-wide text-paper">NEW</span>
+                  <span className="absolute top-0 left-0 z-10 bg-sage px-2 py-1 text-[10px] font-bold tracking-wide text-paper">NEW</span>
                 ) : null}
-                {card.is_online ? <span className="absolute bottom-2 left-2 h-3 w-3 rounded-full bg-sage ring-2 ring-paper" title="Online" /> : null}
-                <div className="absolute right-2 bottom-2 flex items-center gap-1 rounded-full bg-ink/70 px-1.5 py-1 text-paper">
+                {card.is_online ? <span className="absolute bottom-2 left-2 z-10 h-3 w-3 rounded-full bg-sage ring-2 ring-paper" title="Online" /> : null}
+                <div className="absolute right-2 bottom-2 z-10 flex items-center gap-1 rounded-full bg-ink/70 px-1.5 py-1 text-paper">
                   <button type="button" title="Like" onClick={() => onLike(card)} className={`grid h-7 w-7 place-items-center ${liked.has(card.user_id) ? "text-clay" : ""}`}>
                     <HeartIcon filled={liked.has(card.user_id)} />
                   </button>
@@ -325,21 +352,27 @@ export function DesktopDiscover() {
                   <button type="button" title="Favorite" onClick={() => onFavorite(card)} className="grid h-7 w-7 place-items-center">
                     <StarIcon />
                   </button>
-                  <span className="inline-flex items-center gap-0.5 pr-1 text-xs" title="Photos">
+                  <Link
+                    href={`/app/people/${card.user_id}`}
+                    className="inline-flex items-center gap-0.5 pr-1 text-xs"
+                    title="Photos"
+                  >
                     <CameraIcon />
                     {card.photo_count ?? (card.photoUrl ? 1 : 0)}
-                  </span>
+                  </Link>
                 </div>
               </div>
               <div className="space-y-1 px-3 pt-3 pb-2">
-                <h3 className="truncate text-lg font-semibold leading-tight text-ink">{card.display_name}</h3>
-                <p className="truncate text-sm text-ink-soft">{[card.age_years, card.city].filter(Boolean).join(" • ") || "Location kept broad"}</p>
-                <p className="truncate text-sm text-ink-soft">
-                  {t("seeking")}: {seekingLine(card)}
-                </p>
-                <p className={`text-sm font-medium ${card.is_online ? "text-sage" : "text-ink-soft"}`}>
-                  {formatLastSeen(card.is_online, card.last_seen_at)}
-                </p>
+                <Link href={`/app/people/${card.user_id}`} className="block">
+                  <h3 className="truncate text-lg font-semibold leading-tight text-ink">{card.display_name}</h3>
+                  <p className="truncate text-sm text-ink-soft">{[card.age_years, card.city].filter(Boolean).join(" • ") || "Location kept broad"}</p>
+                  <p className="truncate text-sm text-ink-soft">
+                    {t("seeking")}: {seekingLine(card)}
+                  </p>
+                  <p className={`text-sm font-medium ${card.is_online ? "text-sage" : "text-ink-soft"}`}>
+                    {formatLastSeen(card.is_online, card.last_seen_at)}
+                  </p>
+                </Link>
                 <div className="flex gap-3 pt-1 text-xs font-semibold text-ink-soft">
                   <button type="button" onClick={() => onPass(card)}>
                     Pass

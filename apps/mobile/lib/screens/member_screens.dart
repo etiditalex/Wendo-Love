@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:upendo_pamoja/backend.dart';
 import 'package:upendo_pamoja/connect.dart';
 import 'package:upendo_pamoja/domain.dart';
+import 'package:upendo_pamoja/i18n.dart';
 import 'package:upendo_pamoja/screens/connect_screens.dart';
 import 'package:upendo_pamoja/screens/discover_screen.dart';
 import 'package:upendo_pamoja/screens/edit_profile_screen.dart';
@@ -19,7 +20,7 @@ import 'package:upendo_pamoja/app_lock.dart';
 import 'package:upendo_pamoja/phone_alerts.dart';
 import 'package:upendo_pamoja/screens/settings_pages.dart';
 
-export 'connect_screens.dart' show MatchesScreen, MessagesScreen, ViewsScreen;
+export 'connect_screens.dart' show MatchesScreen, MessagesScreen, ViewsScreen, MemberProfileScreen;
 
 class MemberShell extends StatefulWidget {
   const MemberShell({super.key, required this.child});
@@ -157,6 +158,7 @@ class _MemberShellState extends State<MemberShell> with WidgetsBindingObserver {
     if (location.startsWith('/app/profile')) return 4;
     if (location.startsWith('/app/messages')) return 3;
     if (location.startsWith('/app/matches')) return 2;
+    if (location.startsWith('/app/people')) return 0;
     if (location == '/app') return 0;
     return 1;
   }
@@ -169,6 +171,7 @@ class _MemberShellState extends State<MemberShell> with WidgetsBindingObserver {
         location == '/app' ||
         location.startsWith('/app/discover') ||
         location.startsWith('/app/matches') ||
+        location.startsWith('/app/people') ||
         location.startsWith('/app/messages') ||
         location.startsWith('/app/profile');
     final popup = _popup;
@@ -902,6 +905,65 @@ class _SupportScreenState extends State<SupportScreen> {
   }
 }
 
+class UpgradeScreen extends StatefulWidget {
+  const UpgradeScreen({super.key});
+
+  @override
+  State<UpgradeScreen> createState() => _UpgradeScreenState();
+}
+
+class _UpgradeScreenState extends State<UpgradeScreen> {
+  String? _message;
+  bool _busy = false;
+
+  Future<void> _register() async {
+    setState(() => _busy = true);
+    final problem = await registerPremiumInterest();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _message = problem ?? 'Interest saved. Live card payments are not switched on yet.';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text(t('upgrade'), style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: const Color(0xFF9C1B4E))),
+        const SizedBox(height: 12),
+        const Text(
+          'Wendo Plus is the paid layer: mutual matches, reverse matches, and the body-style and education filters. You can also open mutual and reverse matches for free by completing your match criteria — gender, who you hope to meet, a city, and a photo.',
+          style: TextStyle(height: 1.45, color: Color(0xFF44403C)),
+        ),
+        const SizedBox(height: 12),
+        Text(t('lockedFilters'), style: const TextStyle(height: 1.45, color: Color(0xFF44403C))),
+        const SizedBox(height: 20),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            FilledButton(
+              onPressed: _busy ? null : _register,
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE72570)),
+              child: Text(_busy ? 'Saving…' : 'Register Wendo Plus interest'),
+            ),
+            OutlinedButton(
+              onPressed: () => context.go('/app/profile'),
+              child: Text(t('completeProfile')),
+            ),
+          ],
+        ),
+        if (_message != null) ...[
+          const SizedBox(height: 16),
+          Text(_message!, style: const TextStyle(color: Color(0xFF9C1B4E))),
+        ],
+      ],
+    );
+  }
+}
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -958,10 +1020,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _settingsRow(Icons.mail_outline, 'Email address', const ChangeEmailPage()),
                 _settingsRow(Icons.lock_outline, 'Password', const ChangePasswordPage()),
                 _settingsRow(Icons.pin_outlined, 'PIN lock', const PinSettingsPage()),
+                ListTile(
+                  leading: const Icon(Icons.language, color: _ink),
+                  title: Text(appLang.value == AppLang.sw ? t('english') : t('swahili'), style: const TextStyle(color: _ink, fontWeight: FontWeight.w600)),
+                  subtitle: Text(appLang.value == AppLang.sw ? 'Kiswahili' : 'English', style: const TextStyle(color: _inkSoft)),
+                  trailing: const Icon(Icons.chevron_right, color: _mute),
+                  onTap: () async {
+                    await setAppLang(appLang.value == AppLang.sw ? AppLang.en : AppLang.sw);
+                    if (mounted) setState(() {});
+                  },
+                ),
+                const Divider(height: 1),
                 _settingsRow(Icons.shield_outlined, 'Privacy', const PrivacyChoices()),
                 _settingsRow(Icons.policy_outlined, 'Privacy policy', const PrivacyPolicyPage()),
                 _settingsRow(Icons.notifications_none, 'Notifications', const NotificationsPage()),
                 _settingsRow(Icons.person_outline, 'Profile settings', const ProfileSettingsPage()),
+                _settingsRow(Icons.workspace_premium_outlined, t('upgrade'), const UpgradeScreen()),
                 _settingsRow(Icons.star_border, 'Favorites', const FavoritesPage()),
                 _settingsRow(Icons.block, 'Block list', const BlocksPage()),
                 _settingsRow(Icons.download_outlined, 'Export my data', const ExportDataPage()),

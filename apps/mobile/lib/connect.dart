@@ -132,6 +132,54 @@ class ProfileViewer {
   Uint8List? photo;
 }
 
+/// Peer profile for Activity / Home → dedicated member page (gallery + seeking).
+class MemberProfile {
+  MemberProfile({
+    required this.userId,
+    required this.name,
+    required this.city,
+    required this.intent,
+    required this.seekingGenders,
+    this.age,
+    this.bio,
+    this.agePrefMin,
+    this.agePrefMax,
+    this.gender,
+    this.bodyType,
+    this.education,
+    this.online = false,
+    this.lastSeen,
+    this.photoVerified = false,
+    this.blurUntilMutual = false,
+    this.photos = const [],
+  });
+
+  final String userId;
+  final String name;
+  final String city;
+  final String intent;
+  final List<String> seekingGenders;
+  final int? age;
+  final String? bio;
+  final int? agePrefMin;
+  final int? agePrefMax;
+  final String? gender;
+  final String? bodyType;
+  final String? education;
+  final bool online;
+  final DateTime? lastSeen;
+  final bool photoVerified;
+  final bool blurUntilMutual;
+  final List<Uint8List> photos;
+
+  String get seeking => seekingLine(
+        seekingGenders: seekingGenders,
+        ageFrom: agePrefMin ?? 18,
+        ageTo: agePrefMax ?? 80,
+        intent: intent,
+      );
+}
+
 /// The chat screen that is open, so a popup is not shown on top of that conversation.
 String? activeChatMatchId;
 
@@ -223,6 +271,15 @@ Map<String, dynamic> _profileRow(String userId, String name, List<String> intent
   put('height_label', ProfileDraft.heightLabel);
   put('weight_label', ProfileDraft.weightLabel);
   put('body_type', ProfileDraft.bodyType);
+  put('gender', ProfileDraft.gender);
+  put('education', ProfileDraft.education);
+  row['seeking_genders'] = ProfileDraft.seekingGenders;
+  if (ProfileDraft.gender == null || ProfileDraft.gender!.isEmpty) {
+    row['gender'] = null;
+  }
+  if (ProfileDraft.education == null || ProfileDraft.education!.isEmpty) {
+    row['education'] = null;
+  }
   put('ethnicity', ProfileDraft.ethnicity);
   put('children_count', ProfileDraft.childrenCount);
   put('oldest_child', ProfileDraft.oldestChild);
@@ -275,6 +332,21 @@ void applyOwnProfileRow(Map<String, dynamic> row) {
   ProfileDraft.heightLabel = _text(row['height_label']) ?? ProfileDraft.heightLabel;
   ProfileDraft.weightLabel = _text(row['weight_label']) ?? ProfileDraft.weightLabel;
   ProfileDraft.bodyType = _text(row['body_type']) ?? ProfileDraft.bodyType;
+  ProfileDraft.gender = _text(row['gender']) ?? ProfileDraft.gender;
+  ProfileDraft.education = _text(row['education']) ?? ProfileDraft.education;
+  final seeking = row['seeking_genders'];
+  if (seeking is List) {
+    ProfileDraft.seekingGenders = [
+      for (final item in seeking)
+        if (item is String && item.isNotEmpty) item,
+    ];
+  }
+  final premiumUntil = row['premium_until'];
+  if (premiumUntil is String) {
+    ProfileDraft.premiumUntil = DateTime.tryParse(premiumUntil);
+  } else if (premiumUntil is DateTime) {
+    ProfileDraft.premiumUntil = premiumUntil;
+  }
   ProfileDraft.ethnicity = _text(row['ethnicity']) ?? ProfileDraft.ethnicity;
   ProfileDraft.childrenCount = _text(row['children_count']) ?? ProfileDraft.childrenCount;
   ProfileDraft.oldestChild = _text(row['oldest_child']) ?? ProfileDraft.oldestChild;
@@ -350,6 +422,9 @@ Map<String, dynamic> _ownProfileDetails() {
     'height_label': ProfileDraft.heightLabel,
     'weight_label': ProfileDraft.weightLabel,
     'body_type': ProfileDraft.bodyType,
+    'gender': ProfileDraft.gender,
+    'seeking_genders': ProfileDraft.seekingGenders,
+    'education': ProfileDraft.education,
     'ethnicity': ProfileDraft.ethnicity,
     'children_count': ProfileDraft.childrenCount,
     'oldest_child': ProfileDraft.oldestChild,
@@ -500,6 +575,10 @@ void clearMemberDraft() {
   ProfileDraft.heightLabel = null;
   ProfileDraft.weightLabel = null;
   ProfileDraft.bodyType = null;
+  ProfileDraft.gender = null;
+  ProfileDraft.seekingGenders = [];
+  ProfileDraft.education = null;
+  ProfileDraft.premiumUntil = null;
   ProfileDraft.ethnicity = null;
   ProfileDraft.childrenCount = null;
   ProfileDraft.oldestChild = null;
@@ -834,6 +913,30 @@ Future<List<Map<String, dynamic>>> loadPartnerResources() async {
   }
 }
 
+Future<Map<String, ({int photoCount, int likeCount})>> loadDiscoveryCardStats() async {
+  final client = supabase;
+  if (client == null) return {};
+  try {
+    final rows = await client.rpc('discovery_card_stats');
+    if (rows is! List) return {};
+    final map = <String, ({int photoCount, int likeCount})>{};
+    for (final row in rows) {
+      if (row is! Map) continue;
+      final id = row['user_id'];
+      if (id is! String) continue;
+      final photos = row['photo_count'];
+      final likes = row['like_count'];
+      map[id] = (
+        photoCount: photos is int ? photos : (photos is num ? photos.toInt() : 0),
+        likeCount: likes is int ? likes : (likes is num ? likes.toInt() : 0),
+      );
+    }
+    return map;
+  } catch (_) {
+    return {};
+  }
+}
+
 Future<String?> registerPremiumInterest({String plan = 'wendo_plus', String note = ''}) async {
   final client = supabase;
   final user = client?.auth.currentUser;
@@ -987,6 +1090,126 @@ Future<String?> addFavorite(String otherUserId) async {
   } catch (_) {
     return 'Favorite could not be saved.';
   }
+}
+
+Future<String?> sendLike(String otherUserId) async {
+  final client = supabase;
+  final user = client?.auth.currentUser;
+  if (client == null || user == null) return 'Sign in first.';
+  if (otherUserId.isEmpty || otherUserId == user.id) return 'Choose another member.';
+  try {
+    await client.from('likes').insert({'from_user': user.id, 'to_user': otherUserId});
+    return null;
+  } catch (error) {
+    final text = '$error';
+    if (text.contains('duplicate') || text.contains('unique')) return null;
+    return 'Like could not be sent.';
+  }
+}
+
+Future<String?> blockMember(String otherUserId) async {
+  final client = supabase;
+  final user = client?.auth.currentUser;
+  if (client == null || user == null) return 'Sign in first.';
+  if (otherUserId.isEmpty || otherUserId == user.id) return 'Choose another member.';
+  try {
+    await client.from('blocks').insert({'blocker_id': user.id, 'blocked_id': otherUserId});
+    return null;
+  } catch (error) {
+    final text = '$error';
+    if (text.contains('duplicate') || text.contains('unique')) return null;
+    return 'Block could not be saved.';
+  }
+}
+
+Future<MemberProfile?> loadMemberProfile(String otherUserId) async {
+  final client = supabase;
+  final user = client?.auth.currentUser;
+  if (client == null || user == null) return null;
+  if (otherUserId.isEmpty || otherUserId == user.id) return null;
+  const rich =
+      'user_id, display_name, city, bio, relationship_intent, relationship_intents, age_preference_min, age_preference_max, gender, seeking_genders, body_type, education, is_online, last_seen_at, photo_verified_at, blur_until_mutual';
+  const basic =
+      'user_id, display_name, city, bio, relationship_intent, age_preference_min, age_preference_max, is_online, last_seen_at';
+  Map<String, dynamic>? row;
+  try {
+    row = await client.from('profiles').select(rich).eq('user_id', otherUserId).maybeSingle();
+  } catch (_) {
+    try {
+      row = await client.from('profiles').select(basic).eq('user_id', otherUserId).maybeSingle();
+    } catch (_) {
+      return null;
+    }
+  }
+  if (row == null) return null;
+
+  final paths = <String>[];
+  try {
+    final photos = await client
+        .from('profile_photos')
+        .select('storage_path, sort_order')
+        .eq('user_id', otherUserId)
+        .order('sort_order', ascending: true);
+    for (final item in photos) {
+      final path = item['storage_path'];
+      if (path is String && path.isNotEmpty) paths.add(path);
+    }
+  } catch (_) {}
+  if (paths.isEmpty) paths.add('$otherUserId/profile.jpg');
+
+  final bytes = <Uint8List>[];
+  for (final path in paths) {
+    final data = await loadStoredBytes(path);
+    if (data != null) bytes.add(data);
+  }
+  if (bytes.isEmpty) {
+    final fallback = await loadProfilePhoto(otherUserId);
+    if (fallback != null) bytes.add(fallback);
+  }
+
+  int? age;
+  try {
+    final cards = await client.rpc('discovery_cards');
+    if (cards is List) {
+      for (final item in cards) {
+        if (item is! Map) continue;
+        if (item['user_id'] == otherUserId && item['age_years'] is num) {
+          age = (item['age_years'] as num).toInt();
+          break;
+        }
+      }
+    }
+  } catch (_) {}
+
+  final seeking = <String>[];
+  final rawSeeking = row['seeking_genders'];
+  if (rawSeeking is List) {
+    for (final item in rawSeeking) {
+      if (item is String) seeking.add(item);
+    }
+  }
+
+  return MemberProfile(
+    userId: otherUserId,
+    name: (row['display_name'] as String?)?.trim().isNotEmpty == true
+        ? row['display_name'] as String
+        : 'Member',
+    city: (row['city'] as String?) ?? '',
+    intent: (row['relationship_intent'] as String?) ?? '',
+    seekingGenders: seeking,
+    age: age,
+    bio: (row['bio'] as String?)?.trim().isNotEmpty == true ? row['bio'] as String : null,
+    agePrefMin: (row['age_preference_min'] as num?)?.toInt(),
+    agePrefMax: (row['age_preference_max'] as num?)?.toInt(),
+    gender: row['gender'] as String?,
+    bodyType: row['body_type'] as String?,
+    education: row['education'] as String?,
+    online: row['is_online'] == true,
+    lastSeen: DateTime.tryParse('${row['last_seen_at']}'),
+    photoVerified: row['photo_verified_at'] != null,
+    blurUntilMutual: row['blur_until_mutual'] == true,
+    photos: bytes,
+  );
 }
 
 Future<String?> removeFavorite(String otherUserId) async {

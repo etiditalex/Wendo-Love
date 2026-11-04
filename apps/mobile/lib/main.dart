@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:upendo_pamoja/app_lock.dart';
 import 'package:upendo_pamoja/backend.dart';
 import 'package:upendo_pamoja/domain.dart';
+import 'package:upendo_pamoja/i18n.dart';
 import 'package:upendo_pamoja/phone_alerts.dart';
 import 'package:upendo_pamoja/screens/discover_screen.dart';
 import 'package:upendo_pamoja/screens/gate_screens.dart';
@@ -13,6 +14,7 @@ import 'package:upendo_pamoja/screens/setup_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await PhoneAlerts.init();
+  await loadAppLang();
   const url = String.fromEnvironment('SUPABASE_URL');
   const publishableKey = String.fromEnvironment('SUPABASE_ANON_KEY');
   if (url.isNotEmpty && publishableKey.isNotEmpty) {
@@ -152,6 +154,10 @@ final appRouter = GoRouter(
           builder: (context, state) => const MatchesScreen(),
         ),
         GoRoute(
+          path: '/app/people/:id',
+          builder: (context, state) => MemberProfileScreen(userId: state.pathParameters['id'] ?? ''),
+        ),
+        GoRoute(
           path: '/app/messages',
           builder: (context, state) => const MessagesScreen(),
         ),
@@ -161,6 +167,10 @@ final appRouter = GoRouter(
         GoRoute(
           path: '/app/support',
           builder: (context, state) => const SupportScreen(),
+        ),
+        GoRoute(
+          path: '/app/upgrade',
+          builder: (context, state) => const UpgradeScreen(),
         ),
         GoRoute(
           path: '/app/settings',
