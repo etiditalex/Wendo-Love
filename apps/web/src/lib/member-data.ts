@@ -252,15 +252,13 @@ export async function loadHomeBoard(client: SupabaseClient, userId: string): Pro
 
   const seeking = Array.isArray(profile?.seeking_genders) ? profile.seeking_genders.map(String) : [];
   const checks = [
-    Boolean(profile?.display_name),
     Boolean(profile?.city),
-    Boolean(profile?.bio),
     Boolean(profile?.gender),
     seeking.length > 0,
     (photos ?? 0) > 0,
   ];
   const completion = Math.round((checks.filter(Boolean).length / checks.length) * 100);
-  const criteriaComplete = Boolean(profile?.city) && Boolean(profile?.gender) && seeking.length > 0 && (photos ?? 0) > 0;
+  const criteriaComplete = checks.every(Boolean);
   const until = profile?.premium_until ? new Date(String(profile.premium_until)).getTime() : 0;
   const mutualIds = ((matches as Array<{ user_a: string; user_b: string }> | null) ?? []).map((row) =>
     row.user_a === userId ? row.user_b : row.user_a,

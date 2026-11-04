@@ -1,51 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { registerPremiumInterest } from "@/lib/member-data";
+import { loadHomeBoard } from "@/lib/member-data";
 import { useMemberSession } from "@/hooks/useMemberSession";
 import { useLang } from "@/components/LanguageProvider";
 
 export default function UpgradePage() {
   const session = useMemberSession();
   const { t } = useLang();
-  const [message, setMessage] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [complete, setComplete] = useState(false);
 
-  async function onInterest() {
+  useEffect(() => {
     if (!session.userId) return;
     const supabase = createClient();
     if (!supabase) return;
-    setPending(true);
-    const error = await registerPremiumInterest(supabase, session.userId);
-    setPending(false);
-    setMessage(error ?? "Interest saved. Live card payments are not switched on yet.");
-  }
+    loadHomeBoard(supabase, session.userId).then((board) => setComplete(Boolean(board.criteriaComplete)));
+  }, [session.userId]);
 
   return (
     <main className="mx-auto grid max-w-xl gap-4">
       <h1 className="text-4xl text-clay-deep">{t("upgrade")}</h1>
-      <p className="leading-7 text-ink-soft">
-        Wendo Plus is the paid layer: mutual matches, reverse matches, and the body-style and education filters.
-        You can also open mutual and reverse matches for free by completing your match criteria — gender, who you
-        hope to meet, a city, and a photo.
-      </p>
+      <p className="leading-7 text-ink-soft">{t("plusInactive")}</p>
       <p className="leading-7 text-ink-soft">{t("lockedFilters")}</p>
-      <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={onInterest}
-          disabled={pending || !session.userId}
-          className="rounded-md bg-clay px-4 py-2 font-semibold text-paper hover:bg-clay-deep disabled:opacity-60"
-        >
-          {pending ? "Saving…" : "Register Wendo Plus interest"}
-        </button>
-        <Link href="/app/profile" className="rounded-md bg-paper px-4 py-2 font-semibold text-clay-deep ring-1 ring-line">
-          {t("completeProfile")}
-        </Link>
+      <div className="rounded-xl bg-paper p-4 ring-1 ring-line">
+        <p className="font-semibold text-ink">Match criteria unlock Mutual and Reverse for free</p>
+        <ul className="mt-2 grid gap-1 text-sm text-ink-soft">
+          <li>• City / area</li>
+          <li>• I am (gender)</li>
+          <li>• I hope to meet</li>
+          <li>• Profile photo</li>
+        </ul>
+        <p className="mt-3 text-sm text-ink-soft">
+          {complete
+            ? "Your match criteria look complete — Mutual and Reverse are unlocked on Home."
+            : "Open Edit Profile and fill those four fields, then return to Home."}
+        </p>
       </div>
-      {message ? <p className="text-sm text-clay-deep">{message}</p> : null}
+      <Link href="/app/profile" className="rounded-md bg-clay px-4 py-2 text-center font-semibold text-paper hover:bg-clay-deep">
+        {complete ? "Open profile" : t("completeProfile")}
+      </Link>
     </main>
   );
 }

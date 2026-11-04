@@ -482,7 +482,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: const TextStyle(fontSize: 16, color: _inkSoft),
           ),
           const SizedBox(height: 18),
-          _row(context, Icons.person_outline, 'Profile', const EditProfilePage(), fullScreen: true),
+          _row(context, Icons.person_outline, 'Edit profile & match criteria', const EditProfilePage(), fullScreen: true),
           InkWell(
             onTap: () => context.go('/app/more'),
             child: const Padding(
@@ -913,52 +913,38 @@ class UpgradeScreen extends StatefulWidget {
 }
 
 class _UpgradeScreenState extends State<UpgradeScreen> {
-  String? _message;
-  bool _busy = false;
-
-  Future<void> _register() async {
-    setState(() => _busy = true);
-    final problem = await registerPremiumInterest();
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _message = problem ?? 'Interest saved. Live card payments are not switched on yet.';
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
+    final complete = ProfileDraft.matchCriteriaComplete;
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
         Text(t('upgrade'), style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: const Color(0xFF9C1B4E))),
         const SizedBox(height: 12),
-        const Text(
-          'Wendo Plus is the paid layer: mutual matches, reverse matches, and the body-style and education filters. You can also open mutual and reverse matches for free by completing your match criteria — gender, who you hope to meet, a city, and a photo.',
-          style: TextStyle(height: 1.45, color: Color(0xFF44403C)),
-        ),
+        Text(t('plusInactive'), style: const TextStyle(height: 1.45, color: Color(0xFF44403C))),
         const SizedBox(height: 12),
         Text(t('lockedFilters'), style: const TextStyle(height: 1.45, color: Color(0xFF44403C))),
-        const SizedBox(height: 20),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            FilledButton(
-              onPressed: _busy ? null : _register,
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE72570)),
-              child: Text(_busy ? 'Saving…' : 'Register Wendo Plus interest'),
-            ),
-            OutlinedButton(
-              onPressed: () => context.go('/app/profile'),
-              child: Text(t('completeProfile')),
-            ),
-          ],
+        const SizedBox(height: 16),
+        const Text(
+          'Match criteria (free unlock for Mutual and Reverse):',
+          style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF1C1917)),
         ),
-        if (_message != null) ...[
-          const SizedBox(height: 16),
-          Text(_message!, style: const TextStyle(color: Color(0xFF9C1B4E))),
-        ],
+        const SizedBox(height: 8),
+        Text(
+          [
+            '• City / area${ProfileDraft.city.trim().isNotEmpty ? ' ✓' : ''}',
+            '• I am (gender)${(ProfileDraft.gender?.isNotEmpty ?? false) ? ' ✓' : ''}',
+            '• I hope to meet${ProfileDraft.seekingGenders.isNotEmpty ? ' ✓' : ''}',
+            '• Profile photo${ProfileDraft.photo != null ? ' ✓' : ''}',
+          ].join('\n'),
+          style: const TextStyle(height: 1.5, color: Color(0xFF44403C)),
+        ),
+        const SizedBox(height: 20),
+        FilledButton(
+          onPressed: () => context.go('/app/profile'),
+          style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE72570)),
+          child: Text(complete ? 'Open profile' : t('completeProfile')),
+        ),
       ],
     );
   }

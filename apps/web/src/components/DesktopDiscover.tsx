@@ -195,23 +195,58 @@ export function DesktopDiscover() {
             </Link>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {[
-              { href: "/app/upgrade", label: "Mutual" },
-              { href: "/app/upgrade", label: "Reverse" },
-              { href: "/app/upgrade", label: "Filters" },
-              { href: "/app/upgrade", label: "Plus" },
-              { href: "/app/meet", label: "Meet" },
-              { href: "/app/messages", label: "Chat" },
-            ].map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className="rounded-full bg-cream px-3 py-1 text-xs font-semibold text-ink-soft ring-1 ring-line"
-                title={t("learnMembership")}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {(
+              [
+                { label: "Mutual", action: "mutual" as const },
+                { label: "Reverse", action: "reverse" as const },
+                { label: "Filters", action: "filters" as const },
+                { label: "Plus", action: "plus" as const },
+                { label: "Meet", action: "meet" as const },
+                { label: "Chat", action: "chat" as const },
+              ] as const
+            ).map((item) => {
+              if (item.action === "meet") {
+                return (
+                  <Link key={item.label} href="/app/meet" className="rounded-full bg-cream px-3 py-1 text-xs font-semibold text-ink-soft ring-1 ring-line">
+                    {item.label}
+                  </Link>
+                );
+              }
+              if (item.action === "chat") {
+                return (
+                  <Link key={item.label} href="/app/messages" className="rounded-full bg-cream px-3 py-1 text-xs font-semibold text-ink-soft ring-1 ring-line">
+                    {item.label}
+                  </Link>
+                );
+              }
+              if (item.action === "plus") {
+                return (
+                  <Link key={item.label} href="/app/upgrade" className="rounded-full bg-cream px-3 py-1 text-xs font-semibold text-ink-soft ring-1 ring-line">
+                    {item.label}
+                  </Link>
+                );
+              }
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => {
+                    if (item.action === "filters") {
+                      setNote(t("filtersSoon"));
+                      return;
+                    }
+                    if (!listsOpen) {
+                      window.location.href = "/app/profile";
+                      return;
+                    }
+                    setMode(item.action);
+                  }}
+                  className="rounded-full bg-cream px-3 py-1 text-xs font-semibold text-ink-soft ring-1 ring-line"
+                >
+                  {item.label}
+                </button>
+              );
+            })}
           </div>
           <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
             <Count label={t("messages")} value={board.messages} href="/app/messages" />
@@ -254,12 +289,20 @@ export function DesktopDiscover() {
           </>
         ) : (
           <>
-            <Link href="/app/upgrade" className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-ink-soft ring-1 ring-[#cfc4b4]">
+            <button
+              type="button"
+              onClick={() => setNote(t("filtersSoon"))}
+              className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-ink-soft ring-1 ring-[#cfc4b4]"
+            >
               <LockIcon /> {t("bodyStyle")}
-            </Link>
-            <Link href="/app/upgrade" className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-ink-soft ring-1 ring-[#cfc4b4]">
+            </button>
+            <button
+              type="button"
+              onClick={() => setNote(t("filtersSoon"))}
+              className="inline-flex items-center gap-2 rounded-full bg-paper px-3 py-1.5 text-sm text-ink-soft ring-1 ring-[#cfc4b4]"
+            >
               <LockIcon /> {t("education")}
-            </Link>
+            </button>
           </>
         )}
         <button
@@ -316,9 +359,6 @@ export function DesktopDiscover() {
           <div className="mt-4 flex flex-wrap justify-center gap-3">
             <Link href="/app/profile" className="rounded-md bg-clay px-4 py-2 text-sm font-semibold text-paper">
               {t("completeProfile")}
-            </Link>
-            <Link href="/app/upgrade" className="rounded-md bg-paper px-4 py-2 text-sm font-semibold text-clay-deep ring-1 ring-line">
-              {t("seeUpgrade")}
             </Link>
           </div>
         </div>

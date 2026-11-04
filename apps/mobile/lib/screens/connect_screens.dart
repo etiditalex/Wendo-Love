@@ -397,26 +397,6 @@ class _MatchesScreenState extends State<MatchesScreen> {
     }
   }
 
-  Future<void> _likeBack(ReceivedLike like) async {
-    await sendLike(like.userId);
-    final matchId = await openConversation(like.userId);
-    if (!mounted) return;
-    if (matchId != null) {
-      await Navigator.of(context, rootNavigator: true).push(
-        MaterialPageRoute<void>(
-          builder: (context) => ChatPage(
-            matchId: matchId,
-            title: like.name,
-            otherUserId: like.userId,
-            photo: like.photo ?? cachedProfilePhoto(like.userId),
-            mutual: true,
-          ),
-        ),
-      );
-    }
-    await _load();
-  }
-
   void _openPerson(String userId) {
     context.push('/app/people/$userId').then((_) => _load());
   }
@@ -507,22 +487,22 @@ class _MatchesScreenState extends State<MatchesScreen> {
             child: Row(
               children: [
                 _ViewsTab(
-                  label: 'Liked you (${_likes.length})',
+                  label: 'Liked you',
                   selected: _tab == _ActivityTab.likes,
                   onTap: () => _selectTab(_ActivityTab.likes),
                 ),
                 _ViewsTab(
-                  label: 'Views (${_views.length})',
+                  label: 'Views',
                   selected: _tab == _ActivityTab.views,
                   onTap: () => _selectTab(_ActivityTab.views),
                 ),
                 _ViewsTab(
-                  label: 'Favorites (${_favorites.length})',
+                  label: 'Favorites',
                   selected: _tab == _ActivityTab.favorites,
                   onTap: () => _selectTab(_ActivityTab.favorites),
                 ),
                 _ViewsTab(
-                  label: 'Mutual (${_mutual.length})',
+                  label: 'Mutual',
                   selected: _tab == _ActivityTab.mutual,
                   onTap: () => _selectTab(_ActivityTab.mutual),
                 ),
@@ -545,42 +525,23 @@ class _MatchesScreenState extends State<MatchesScreen> {
           );
         }
         return GridView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
             mainAxisSpacing: 12,
             crossAxisSpacing: 12,
-            childAspectRatio: 0.72,
+            childAspectRatio: 0.78,
           ),
           itemCount: _likes.length,
           itemBuilder: (context, index) {
             final like = _likes[index];
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _openPerson(like.userId),
-                    child: _ViewCard(
-                      photo: like.photo ?? cachedProfilePhoto(like.userId),
-                      name: like.name,
-                      revealed: _mutualIds.contains(like.userId),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                FilledButton(
-                  onPressed: () => _likeBack(like),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _clay,
-                    foregroundColor: _paper,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: const StadiumBorder(),
-                  ),
-                  child: const Text('Like back', style: TextStyle(fontWeight: FontWeight.w700)),
-                ),
-              ],
+            return GestureDetector(
+              onTap: () => _openPerson(like.userId),
+              child: _ViewCard(
+                photo: like.photo ?? cachedProfilePhoto(like.userId),
+                name: like.name,
+                revealed: _mutualIds.contains(like.userId),
+              ),
             );
           },
         );
@@ -1037,122 +998,6 @@ class _MessageRow extends StatelessWidget {
             else
               Text(_date, style: const TextStyle(color: Color(0xFFB0A8A2), fontSize: 12)),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PersonTile extends StatelessWidget {
-  const _PersonTile({
-    required this.name,
-    required this.subtitle,
-    required this.onTap,
-    this.photo,
-    this.revealed = false,
-  });
-
-  final String name;
-  final String subtitle;
-  final VoidCallback onTap;
-  final Uint8List? photo;
-  final bool revealed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Material(
-        color: _paper,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                _PeerAvatar(photo: photo, online: false, revealed: revealed),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: _ink)),
-                      Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _inkSoft)),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right, color: _inkSoft),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ThreadTile extends StatelessWidget {
-  const _ThreadTile({required this.thread, required this.onTap, this.subtitle});
-
-  final MatchThread thread;
-  final VoidCallback onTap;
-  final String? subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final presence = lastSeenLabel(lastSeen: thread.lastSeen, online: thread.online);
-    final online = presence == 'Online';
-    final detail = subtitle ?? (thread.city.isEmpty ? 'Mutual match' : thread.city);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Material(
-        color: _paper,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                _PeerAvatar(
-                  photo: thread.photo ?? cachedProfilePhoto(thread.otherUserId),
-                  online: online,
-                  revealed: thread.mutual,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(thread.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: _ink)),
-                      Text(
-                        detail,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: _inkSoft),
-                      ),
-                      if (presence != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            presence,
-                            style: TextStyle(
-                              color: online ? _sage : _inkSoft,
-                              fontSize: 13,
-                              fontWeight: online ? FontWeight.w700 : FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right, color: _inkSoft),
-              ],
-            ),
-          ),
         ),
       ),
     );
@@ -1796,10 +1641,7 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
                         style: TextStyle(color: _paper, fontSize: 18, fontWeight: FontWeight.w600),
                       ),
                     ),
-                    TextButton(
-                      onPressed: () => context.push('/app/upgrade'),
-                      child: const Text('Upgrade', style: TextStyle(color: _paper, fontWeight: FontWeight.w700)),
-                    ),
+                    const SizedBox(width: 48),
                   ],
                 ),
               ),

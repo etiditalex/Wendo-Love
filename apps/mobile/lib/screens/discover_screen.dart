@@ -149,7 +149,6 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
 
   int get _completionPercent {
     final checks = [
-      JoinDraft.displayName.trim().isNotEmpty,
       ProfileDraft.city.trim().isNotEmpty,
       ProfileDraft.gender?.isNotEmpty == true,
       ProfileDraft.seekingGenders.isNotEmpty,
@@ -157,6 +156,43 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
     ];
     final done = checks.where((item) => item).length;
     return ((done / checks.length) * 100).round();
+  }
+
+  void _openMembershipChip(String label) {
+    switch (label) {
+      case 'Mutual':
+        if (!_listsOpen) {
+          context.go('/app/profile');
+          return;
+        }
+        setState(() {
+          _mode = DiscoverMode.mutual;
+          _page = 0;
+        });
+        return;
+      case 'Reverse':
+        if (!_listsOpen) {
+          context.go('/app/profile');
+          return;
+        }
+        setState(() {
+          _mode = DiscoverMode.reverse;
+          _page = 0;
+        });
+        return;
+      case 'Filters':
+        _say(t('filtersSoon'));
+        return;
+      case 'Plus':
+        context.push('/app/upgrade');
+        return;
+      case 'Meet':
+        context.push('/app/meet');
+        return;
+      case 'Chat':
+        context.go('/app/messages');
+        return;
+    }
   }
 
   @override
@@ -824,7 +860,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
 
   Future<void> _pickBodyFilter() async {
     if (!ProfileDraft.hasPlus) {
-      if (mounted) context.push('/app/upgrade');
+      _say(t('filtersSoon'));
       return;
     }
     const options = ['Any', 'Slim', 'Average', 'Athletic', 'Curvy'];
@@ -843,7 +879,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
 
   Future<void> _pickEducationFilter() async {
     if (!ProfileDraft.hasPlus) {
-      if (mounted) context.push('/app/upgrade');
+      _say(t('filtersSoon'));
       return;
     }
     final options = ['Any', ...educationOptions.map((o) => o.label)];
@@ -982,19 +1018,12 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               children: [
-                for (final item in const [
-                  ('Mutual', '/app/upgrade'),
-                  ('Reverse', '/app/upgrade'),
-                  ('Filters', '/app/upgrade'),
-                  ('Plus', '/app/upgrade'),
-                  ('Meet', '/app/meet'),
-                  ('Chat', '/app/messages'),
-                ]) ...[
+                for (final label in const ['Mutual', 'Reverse', 'Filters', 'Plus', 'Meet', 'Chat']) ...[
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ActionChip(
-                      label: Text(item.$1, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      onPressed: () => context.push(item.$2),
+                      label: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      onPressed: () => _openMembershipChip(label),
                       backgroundColor: _paper,
                       side: const BorderSide(color: _line),
                       visualDensity: VisualDensity.compact,
@@ -1177,9 +1206,9 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                                     highlighted: _educationFilter.isNotEmpty,
                                   ),
                                 ] else ...[
-                                  _LockedFilterChip(label: t('bodyStyle'), onTap: () => context.push('/app/upgrade')),
+                                  _LockedFilterChip(label: t('bodyStyle'), onTap: () => _say(t('filtersSoon'))),
                                   const SizedBox(width: 8),
-                                  _LockedFilterChip(label: t('education'), onTap: () => context.push('/app/upgrade')),
+                                  _LockedFilterChip(label: t('education'), onTap: () => _say(t('filtersSoon'))),
                                 ],
                                 const SizedBox(width: 8),
                                 _FilterChip(
@@ -1247,11 +1276,6 @@ class _DiscoverScreenState extends State<DiscoverScreen> with TickerProviderStat
                                           onPressed: () => context.go('/app/profile'),
                                           style: FilledButton.styleFrom(backgroundColor: _clay),
                                           child: Text(t('completeProfile')),
-                                        ),
-                                        OutlinedButton(
-                                          onPressed: () => context.push('/app/upgrade'),
-                                          style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF9C1B4E)),
-                                          child: Text(t('seeUpgrade')),
                                         ),
                                       ],
                                     ),

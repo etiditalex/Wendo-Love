@@ -118,8 +118,8 @@ export default function MemberProfilePage() {
         <Link href="/app" className="text-sm font-semibold text-clay-deep underline">
           ← Return to results
         </Link>
-        <Link href="/app/upgrade" className="text-sm font-semibold text-clay-deep underline">
-          {t("upgrade")}
+        <Link href="/app" className="text-sm font-semibold text-clay-deep underline">
+          Home
         </Link>
       </div>
 
