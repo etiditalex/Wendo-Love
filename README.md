@@ -56,6 +56,18 @@ Put the Supabase project URL and anon key in `.env.local`. Do not put the servic
 
 Open http://localhost:3000. Member screens are under `/app`.
 
+## Vercel
+
+The Next.js app is in **`apps/web`**, not the repo root. Deploying the repo root alone often shows Vercel’s `404 NOT_FOUND` page.
+
+**Required:** Project → **Settings → General → Root Directory** → `apps/web` → Save → Redeploy.
+
+Also set Production env vars:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Framework Preset: Next.js. Leave Build/Output as defaults after Root Directory is `apps/web`.
+
 ## Mobile
 
 Flutter is not on the system PATH yet. This machine has the SDK at `%LOCALAPPDATA%\flutter`. Windows plugin builds need Developer Mode so Flutter can create symlinks (`start ms-settings:developers`).
