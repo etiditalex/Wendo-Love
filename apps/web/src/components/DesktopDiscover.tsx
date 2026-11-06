@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLang } from "@/components/LanguageProvider";
@@ -29,6 +30,7 @@ const educationOptions = ["", "secondary", "diploma", "degree", "postgraduate"];
 
 export function DesktopDiscover() {
   const { t } = useLang();
+  const router = useRouter();
   const [cards, setCards] = useState<DiscoveryCard[]>([]);
   const [board, setBoard] = useState<HomeBoard | null>(null);
   const [liked, setLiked] = useState<Set<string>>(new Set());
@@ -120,7 +122,7 @@ export function DesktopDiscover() {
     const supabase = createClient();
     if (!supabase) return;
     const matchId = await openConversation(supabase, card.user_id);
-    if (matchId) window.location.href = `/app/messages?match=${matchId}`;
+    if (matchId) router.push(`/app/messages?match=${matchId}`);
     else setNote("Chat opens after you both like each other.");
   }
 
@@ -236,7 +238,7 @@ export function DesktopDiscover() {
                       return;
                     }
                     if (!listsOpen) {
-                      window.location.href = "/app/profile";
+                      router.push("/app/profile");
                       return;
                     }
                     setMode(item.action);

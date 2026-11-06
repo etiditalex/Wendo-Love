@@ -2,6 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { consentVersion, isAdult, product } from "@/lib/domain";
 import { createClient } from "@/lib/supabase/client";
 import { useMemberSession } from "@/hooks/useMemberSession";
@@ -66,6 +67,7 @@ export function SignedOutNote() {
 
 export function DiscoverPanel() {
   const session = useMemberSession();
+  const router = useRouter();
   const [cards, setCards] = useState<DiscoveryCard[]>([]);
   const [note, setNote] = useState("Loading members…");
   const [liked, setLiked] = useState<Set<string>>(new Set());
@@ -97,7 +99,7 @@ export function DiscoverPanel() {
     if (!supabase) return;
     await recordProfileView(supabase, card.user_id);
     const matchId = await openConversation(supabase, card.user_id);
-    if (matchId) window.location.href = `/app/messages?match=${matchId}`;
+    if (matchId) router.push(`/app/messages?match=${matchId}`);
   }
 
   async function onPass(card: DiscoveryCard) {
@@ -663,6 +665,7 @@ type ActivityTab = "likes" | "views" | "favorites" | "mutual";
 
 export function MatchesPanel() {
   const session = useMemberSession();
+  const router = useRouter();
   const [tab, setTab] = useState<ActivityTab>("likes");
   const [likes, setLikes] = useState<ReceivedLike[]>([]);
   const [views, setViews] = useState<ReceivedLike[]>([]);
@@ -703,7 +706,7 @@ export function MatchesPanel() {
     if (!supabase) return;
     await sendLike(supabase, session.userId, userId);
     const matchId = await openConversation(supabase, userId);
-    if (matchId) window.location.href = `/app/messages?match=${matchId}`;
+    if (matchId) router.push(`/app/messages?match=${matchId}`);
   }
 
   function selectTab(next: ActivityTab) {

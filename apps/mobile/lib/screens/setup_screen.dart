@@ -191,7 +191,11 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   void _back() {
-    if (_step == 0) return;
+    if (_step == 0) {
+      // Stay inside the app: return to join rather than exiting the process.
+      context.go('/join');
+      return;
+    }
     setState(() {
       _step -= 1;
       _message = null;

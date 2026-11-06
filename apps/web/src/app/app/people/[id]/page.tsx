@@ -115,9 +115,16 @@ export default function MemberProfilePage() {
   return (
     <main className="mx-auto grid max-w-4xl gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href="/app" className="text-sm font-semibold text-clay-deep underline">
-          ← Return to results
-        </Link>
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof window !== "undefined" && window.history.length > 1) router.back();
+            else router.push("/app");
+          }}
+          className="text-sm font-semibold text-clay-deep underline"
+        >
+          ← Back
+        </button>
         <Link href="/app" className="text-sm font-semibold text-clay-deep underline">
           Home
         </Link>

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:upendo_pamoja/nav.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:upendo_pamoja/backend.dart';
@@ -1575,11 +1576,7 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
       setState(() => _note = problem);
       return;
     }
-    if (context.canPop()) {
-      context.pop();
-    } else {
-      context.go('/app');
-    }
+    popOrGo(context, '/app');
   }
 
   Future<void> _block() async {
@@ -1589,11 +1586,7 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
       setState(() => _note = problem);
       return;
     }
-    if (context.canPop()) {
-      context.pop();
-    } else {
-      context.go('/app');
-    }
+    popOrGo(context, '/app');
   }
 
   Future<void> _report() async {
@@ -1625,13 +1618,7 @@ class _MemberProfileScreenState extends State<MemberProfileScreen> {
                 child: Row(
                   children: [
                     IconButton(
-                      onPressed: () {
-                        if (context.canPop()) {
-                          context.pop();
-                        } else {
-                          context.go('/app');
-                        }
-                      },
+                      onPressed: () => popOrGo(context, '/app'),
                       icon: const Icon(Icons.arrow_back, color: _paper),
                     ),
                     const Expanded(

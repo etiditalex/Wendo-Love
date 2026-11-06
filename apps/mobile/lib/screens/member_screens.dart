@@ -17,6 +17,7 @@ import 'package:upendo_pamoja/screens/discover_screen.dart';
 import 'package:upendo_pamoja/screens/edit_profile_screen.dart';
 import 'package:upendo_pamoja/screens/profile_about_screens.dart';
 import 'package:upendo_pamoja/app_lock.dart';
+import 'package:upendo_pamoja/nav.dart';
 import 'package:upendo_pamoja/phone_alerts.dart';
 import 'package:upendo_pamoja/screens/settings_pages.dart';
 
@@ -158,9 +159,11 @@ class _MemberShellState extends State<MemberShell> with WidgetsBindingObserver {
     if (location.startsWith('/app/profile')) return 4;
     if (location.startsWith('/app/messages')) return 3;
     if (location.startsWith('/app/matches')) return 2;
+    if (location.startsWith('/app/discover')) return 1;
     if (location.startsWith('/app/people')) return 0;
     if (location == '/app') return 0;
-    return 1;
+    // Secondary pages (meet/learn/support/upgrade/more/settings): keep Discover highlighted.
+    return 0;
   }
 
   @override
@@ -178,34 +181,43 @@ class _MemberShellState extends State<MemberShell> with WidgetsBindingObserver {
     final preview = popup == null
         ? ''
         : (popup.body.length > 120 ? '${popup.body.substring(0, 120)}…' : popup.body);
-    return Scaffold(
-      backgroundColor: const Color(0xFFF6F1E8),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          Column(
-            children: [
-              Expanded(child: edgeToEdge ? widget.child : SafeArea(child: widget.child)),
-              if (!settings)
-                SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
-                    child: _MemberBar(
-                      index: _barIndex(location),
-                      likeCount: _likeCount,
-                      messageCount: _messageCount,
-                      viewCount: _viewCount,
-                      onSelected: (value) {
-                        const paths = ['/app', '/app/discover', '/app/matches', '/app/messages', '/app/profile'];
-                        if (value == 0) discoverReload.value++;
-                        context.go(paths[value]);
-                      },
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        final stayedInApp = handleMemberBack(context);
+        if (!stayedInApp) {
+          SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF6F1E8),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            Column(
+              children: [
+                Expanded(child: edgeToEdge ? widget.child : SafeArea(child: widget.child)),
+                if (!settings)
+                  SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+                      child: _MemberBar(
+                        index: _barIndex(location),
+                        likeCount: _likeCount,
+                        messageCount: _messageCount,
+                        viewCount: _viewCount,
+                        onSelected: (value) {
+                          const paths = ['/app', '/app/discover', '/app/matches', '/app/messages', '/app/profile'];
+                          if (value == 0) discoverReload.value++;
+                          context.go(paths[value]);
+                        },
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            ),
           if (popup != null)
             Positioned(
               top: MediaQuery.paddingOf(context).top + 8,
@@ -266,6 +278,7 @@ class _MemberShellState extends State<MemberShell> with WidgetsBindingObserver {
             ),
         ],
       ),
+    ),
     );
   }
 }
@@ -425,7 +438,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                             ),
                             IconButton(
-                              onPressed: () => context.go('/app/settings'),
+                              onPressed: () => context.push('/app/settings'),
                               icon: const Icon(Icons.settings, color: _paper),
                             ),
                           ],
@@ -484,7 +497,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 18),
           _row(context, Icons.person_outline, 'Edit profile & match criteria', const EditProfilePage(), fullScreen: true),
           InkWell(
-            onTap: () => context.go('/app/more'),
+            onTap: () => context.push('/app/more'),
             child: const Padding(
               padding: EdgeInsets.symmetric(horizontal: 22, vertical: 14),
               child: Row(
@@ -530,7 +543,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
                         shape: const StadiumBorder(),
                       ),
-                      onPressed: () => context.go('/app/settings'),
+                      onPressed: () => context.push('/app/settings'),
                       child: const Text('Review privacy', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                     ),
                   ],
@@ -631,20 +644,38 @@ class MoreScreen extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Text('More', style: Theme.of(context).textTheme.headlineMedium),
+        Row(
+          children: [
+            IconButton(
+              onPressed: () => popOrGo(context, '/app/profile'),
+              icon: const Icon(Icons.arrow_back),
+            ),
+            Expanded(child: Text('More', style: Theme.of(context).textTheme.headlineMedium)),
+          ],
+        ),
         const SizedBox(height: 12),
         for (final item in const [
           ('Meet safely', '/app/meet'),
           ('Learn', '/app/learn'),
           ('Support', '/app/support'),
           ('Settings', '/app/settings'),
-          ('Back to welcome', '/'),
         ])
           ListTile(
             title: Text(item.$1),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.go(item.$2),
+            onTap: () => context.push(item.$2),
           ),
+        ListTile(
+          title: const Text('Sign out to welcome'),
+          trailing: const Icon(Icons.logout),
+          onTap: () async {
+            clearMemberDraft();
+            AppLock.lockSession();
+            await markPresence(online: false);
+            await supabase?.auth.signOut();
+            if (context.mounted) context.go('/');
+          },
+        ),
       ],
     );
   }
@@ -728,7 +759,7 @@ class _MeetScreenState extends State<MeetScreen> {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Text('Meet safely', style: Theme.of(context).textTheme.headlineMedium),
+        _pageTitle(context, 'Meet safely'),
         const SizedBox(height: 12),
         const Text(
           'Meet first in a public place. Trusted contacts and check-ins stay private to you. Video calls are optional. If you are in immediate danger, contact local emergency services.',
@@ -860,7 +891,7 @@ class _SupportScreenState extends State<SupportScreen> {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Text('Support', style: Theme.of(context).textTheme.headlineMedium),
+        _pageTitle(context, 'Support'),
         const SizedBox(height: 12),
         const Text(
           'Partner links open outside Wendo. A clinic should never hand over a patient list, and this app will not track clinic visits.',
@@ -919,7 +950,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Text(t('upgrade'), style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: const Color(0xFF9C1B4E))),
+        _pageTitle(context, t('upgrade'), color: const Color(0xFF9C1B4E)),
         const SizedBox(height: 12),
         Text(t('plusInactive'), style: const TextStyle(height: 1.45, color: Color(0xFF44403C))),
         const SizedBox(height: 12),
@@ -941,7 +972,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
         ),
         const SizedBox(height: 20),
         FilledButton(
-          onPressed: () => context.go('/app/profile'),
+          onPressed: () => popOrGo(context, '/app/profile'),
           style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE72570)),
           child: Text(complete ? 'Open profile' : t('completeProfile')),
         ),
@@ -990,7 +1021,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: IconButton(
-                        onPressed: () => context.go('/app/profile'),
+                        onPressed: () => popOrGo(context, '/app/profile'),
                         icon: const Icon(Icons.arrow_back, color: _paper),
                       ),
                     ),
@@ -1419,12 +1450,29 @@ class _Page extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Text(title, style: Theme.of(context).textTheme.headlineMedium),
+        _pageTitle(context, title),
         const SizedBox(height: 12),
         Text(body),
       ],
     );
   }
+}
+
+Widget _pageTitle(BuildContext context, String title, {Color? color}) {
+  return Row(
+    children: [
+      IconButton(
+        onPressed: () => popOrGo(context, '/app'),
+        icon: const Icon(Icons.arrow_back),
+      ),
+      Expanded(
+        child: Text(
+          title,
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: color),
+        ),
+      ),
+    ],
+  );
 }
 
 String _memberId(String name) {
